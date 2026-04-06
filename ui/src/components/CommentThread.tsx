@@ -545,7 +545,7 @@ const TimelineList = memo(function TimelineList({
   );
 });
 
-export function CommentThread({
+export const CommentThread = memo(function CommentThread({
   comments,
   queuedComments = [],
   feedbackVotes = [],
@@ -891,4 +891,6 @@ export function CommentThread({
 
     </div>
   );
-}
+});
+
+CommentThread.displayName = "CommentThread";

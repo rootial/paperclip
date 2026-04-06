@@ -549,7 +549,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
       characterData: true,
     });
     return () => observer.disconnect();
-  }, [decorateProjectMentions, value]);
+  }, [decorateProjectMentions]);
 
   const selectMention = useCallback(
     (option: AutocompleteOption) => {
