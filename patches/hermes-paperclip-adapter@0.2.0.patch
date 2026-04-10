@@ -1,0 +1,13 @@
+diff --git a/dist/server/execute.js b/dist/server/execute.js
+index 93cddf82..23fb7e72 100644
+--- a/dist/server/execute.js
++++ b/dist/server/execute.js
+@@ -141,7 +141,7 @@ function buildPrompt(ctx, config) {
+ /** Regex to extract session ID from Hermes quiet-mode output: "session_id: <id>" */
+ const SESSION_ID_REGEX = /^session_id:\s*(\S+)/m;
+ /** Regex for legacy session output format */
+-const SESSION_ID_REGEX_LEGACY = /session[_ ](?:id|saved)[:\s]+([a-zA-Z0-9_-]+)/i;
++const SESSION_ID_REGEX_LEGACY = /^(?:session[_ ](?:id|saved))[:\s]+([a-zA-Z0-9_-]+)\s*$/im;
+ /** Regex to extract token usage from Hermes output. */
+ const TOKEN_USAGE_REGEX = /tokens?[:\s]+(\d+)\s*(?:input|in)\b.*?(\d+)\s*(?:output|out)\b/i;
+ /** Regex to extract cost from Hermes output. */

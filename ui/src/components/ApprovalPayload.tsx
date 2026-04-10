@@ -6,6 +6,7 @@ export const typeLabel: Record<string, string> = {
   approve_ceo_strategy: "CEO Strategy",
   budget_override_required: "Budget Override",
   request_board_approval: "Board Approval",
+  agent_config_change: "Agent Config Change",
 };
 
 function firstNonEmptyString(...values: unknown[]): string | null {
@@ -41,6 +42,7 @@ export const typeIcon: Record<string, typeof UserPlus> = {
   approve_ceo_strategy: Lightbulb,
   budget_override_required: ShieldAlert,
   request_board_approval: ShieldCheck,
+  agent_config_change: ShieldAlert,
 };
 
 export const defaultTypeIcon = ShieldCheck;
@@ -229,6 +231,33 @@ function BoardApprovalPayloadContent({ payload }: { payload: Record<string, unkn
   );
 }
 
+export function AgentConfigChangePayload({ payload }: { payload: Record<string, unknown> }) {
+  const targetAgentId = typeof payload.targetAgentId === "string" ? payload.targetAgentId : null;
+  const requestedPatch =
+    typeof payload.requestedPatch === "object" && payload.requestedPatch !== null
+      ? (payload.requestedPatch as Record<string, unknown>)
+      : null;
+  const changedKeys = requestedPatch ? Object.keys(requestedPatch).sort() : [];
+  return (
+    <div className="mt-3 space-y-1.5 text-sm">
+      <PayloadField label="Target" value={targetAgentId} />
+      <PayloadField label="Reason" value={payload.reason} />
+      <PayloadField label="Risk" value={payload.risk} />
+      <PayloadField label="Rollback" value={payload.rollbackPlan} />
+      {changedKeys.length > 0 ? (
+        <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          Requested patch keys: {changedKeys.join(", ")}
+        </div>
+      ) : null}
+      {requestedPatch ? (
+        <pre className="mt-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground overflow-x-auto max-h-48">
+          {JSON.stringify(requestedPatch, null, 2)}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
 export function ApprovalPayloadRenderer({
   type,
   payload,
@@ -243,5 +272,6 @@ export function ApprovalPayloadRenderer({
   if (type === "request_board_approval") {
     return <BoardApprovalPayload payload={payload} hideTitle={hidePrimaryTitle} />;
   }
+  if (type === "agent_config_change") return <AgentConfigChangePayload payload={payload} />;
   return <CeoStrategyPayload payload={payload} />;
 }
