@@ -55,11 +55,31 @@ describe("agent local JWT", () => {
     });
   });
 
-  it("returns null when secret is missing", () => {
+  it("falls back to the local default secret when no auth secret env is set", () => {
     process.env[secretEnv] = "";
+    process.env[betterAuthSecretEnv] = "";
     const token = createLocalAgentJwt("agent-1", "company-1", "claude_local", "run-1");
-    expect(token).toBeNull();
-    expect(verifyLocalAgentJwt("abc.def.ghi")).toBeNull();
+    expect(token).toBeTruthy();
+    expect(verifyLocalAgentJwt(token!)).toMatchObject({
+      sub: "agent-1",
+      company_id: "company-1",
+    });
+  });
+
+  it("falls back to BETTER_AUTH_SECRET when PAPERCLIP_AGENT_JWT_SECRET is missing", () => {
+    process.env[secretEnv] = "";
+    process.env[betterAuthSecretEnv] = "better-auth-secret";
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    const token = createLocalAgentJwt("agent-1", "company-1", "codex_local", "run-1");
+
+    expect(token).toBeTruthy();
+    expect(verifyLocalAgentJwt(token!)).toMatchObject({
+      sub: "agent-1",
+      company_id: "company-1",
+      adapter_type: "codex_local",
+      run_id: "run-1",
+    });
   });
 
   it("falls back to BETTER_AUTH_SECRET when PAPERCLIP_AGENT_JWT_SECRET is absent", () => {
@@ -96,5 +116,33 @@ describe("agent local JWT", () => {
     process.env[issuerEnv] = "paperclip";
     process.env[audienceEnv] = "paperclip-api";
     expect(verifyLocalAgentJwt(token!)).toBeNull();
+  });
+
+  it("rejects tokens that omit iss or aud claims entirely", () => {
+    // A token crafted without iss/aud must not pass verification even if the
+    // signature is valid — the previous "only validate when present" logic
+    // allowed bypass by omission (Issue 1 fix).
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    const { createHmac } = require("node:crypto");
+    const secret = process.env[secretEnv]!;
+    const now = Math.floor(Date.now() / 1000);
+    const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const payloadWithoutIssuers = Buffer.from(
+      JSON.stringify({
+        sub: "agent-1",
+        company_id: "company-1",
+        adapter_type: "claude_local",
+        run_id: "run-1",
+        iat: now,
+        exp: now + 3600,
+        // iss and aud intentionally omitted
+      }),
+    ).toString("base64url");
+    const signingInput = `${header}.${payloadWithoutIssuers}`;
+    const sig = createHmac("sha256", secret).update(signingInput).digest("base64url");
+    const crafted = `${signingInput}.${sig}`;
+
+    expect(verifyLocalAgentJwt(crafted)).toBeNull();
   });
 });

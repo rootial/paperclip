@@ -14,6 +14,7 @@ const payload = {
   prompt: fs.readFileSync(0, "utf8"),
   codexHome: process.env.CODEX_HOME || null,
   paperclipWakePayloadJson: process.env.PAPERCLIP_WAKE_PAYLOAD_JSON || null,
+  paperclipApiKey: process.env.PAPERCLIP_API_KEY || null,
   paperclipEnvKeys: Object.keys(process.env)
     .filter((key) => key.startsWith("PAPERCLIP_"))
     .sort(),
@@ -34,6 +35,7 @@ type CapturePayload = {
   prompt: string;
   codexHome: string | null;
   paperclipWakePayloadJson: string | null;
+  paperclipApiKey: string | null;
   paperclipEnvKeys: string[];
 };
 
@@ -915,6 +917,71 @@ describe("codex execute", () => {
       else process.env.PAPERCLIP_IN_WORKTREE = previousPaperclipInWorktree;
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previousCodexHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("generates a fallback PAPERCLIP_API_KEY when the heartbeat auth token is missing", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-fallback-jwt-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "capture.json");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFakeCodexCommand(commandPath);
+
+    const logs: LogEntry[] = [];
+    const previousAgentJwtSecret = process.env.PAPERCLIP_AGENT_JWT_SECRET;
+    const previousBetterAuthSecret = process.env.BETTER_AUTH_SECRET;
+    delete process.env.PAPERCLIP_AGENT_JWT_SECRET;
+    delete process.env.BETTER_AUTH_SECRET;
+
+    try {
+      const result = await execute({
+        runId: "run-fallback-jwt",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: {
+            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+          },
+          promptTemplate: "Follow the paperclip heartbeat.",
+        },
+        context: {},
+        onLog: async (stream, chunk) => {
+          logs.push({ stream, chunk });
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+
+      const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
+      expect(capture.paperclipApiKey).toBeTruthy();
+      expect(capture.paperclipEnvKeys).toContain("PAPERCLIP_API_KEY");
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          stream: "stdout",
+          chunk: expect.stringContaining("Generated fallback local agent JWT for PAPERCLIP_API_KEY"),
+        }),
+      );
+    } finally {
+      if (previousAgentJwtSecret === undefined) delete process.env.PAPERCLIP_AGENT_JWT_SECRET;
+      else process.env.PAPERCLIP_AGENT_JWT_SECRET = previousAgentJwtSecret;
+      if (previousBetterAuthSecret === undefined) delete process.env.BETTER_AUTH_SECRET;
+      else process.env.BETTER_AUTH_SECRET = previousBetterAuthSecret;
       await fs.rm(root, { recursive: true, force: true });
     }
   });

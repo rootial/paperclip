@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import {
   addApprovalCommentSchema,
+  agentConfigChangeApprovalPayloadSchema,
   createApprovalSchema,
   requestApprovalRevisionSchema,
   resolveApprovalSchema,
@@ -11,6 +12,7 @@ import { validate } from "../middleware/validate.js";
 import { logger } from "../middleware/logger.js";
 import {
   approvalService,
+  agentService,
   heartbeatService,
   issueApprovalService,
   logActivity,
@@ -18,6 +20,7 @@ import {
 } from "../services/index.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { redactEventPayload } from "../redaction.js";
+import { notFound, unprocessable } from "../errors.js";
 
 function redactApprovalPayload<T extends { payload: Record<string, unknown> }>(approval: T): T {
   return {
@@ -29,10 +32,83 @@ function redactApprovalPayload<T extends { payload: Record<string, unknown> }>(a
 export function approvalRoutes(db: Db) {
   const router = Router();
   const svc = approvalService(db);
+  const agentsSvc = agentService(db);
   const heartbeat = heartbeatService(db);
   const issueApprovalsSvc = issueApprovalService(db);
   const secretsSvc = secretService(db);
   const strictSecretsMode = process.env.PAPERCLIP_SECRETS_STRICT_MODE === "true";
+
+  async function normalizeApprovalPayload(
+    companyId: string,
+    type: string,
+    payload: Record<string, unknown>,
+  ) {
+    if (type === "hire_agent") {
+      return secretsSvc.normalizeHireApprovalPayloadForPersistence(
+        companyId,
+        payload,
+        { strictMode: strictSecretsMode },
+      );
+    }
+
+    if (type === "agent_config_change") {
+      const parsed = agentConfigChangeApprovalPayloadSchema.parse(payload);
+      const targetAgent = await agentsSvc.getById(parsed.targetAgentId);
+      if (!targetAgent) throw notFound("Target agent not found");
+      if (targetAgent.companyId !== companyId) {
+        throw unprocessable("Target agent must belong to the same company");
+      }
+
+      const requestedPatch = { ...parsed.requestedPatch } as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(requestedPatch, "adapterConfig")) {
+        const adapterConfig = requestedPatch.adapterConfig;
+        if (typeof adapterConfig !== "object" || adapterConfig === null || Array.isArray(adapterConfig)) {
+          throw unprocessable("requestedPatch.adapterConfig must be an object");
+        }
+        requestedPatch.adapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
+          companyId,
+          adapterConfig as Record<string, unknown>,
+          { strictMode: strictSecretsMode },
+        );
+      }
+
+      return {
+        ...parsed,
+        requestedPatch,
+      };
+    }
+
+    return payload;
+  }
+
+  async function applyApprovedAgentConfigChange(
+    approval: Awaited<ReturnType<typeof svc.getById>>,
+    decidedByUserId: string,
+  ) {
+    if (!approval || approval.type !== "agent_config_change") return null;
+    const parseResult = agentConfigChangeApprovalPayloadSchema.safeParse(approval.payload);
+    if (!parseResult.success) {
+      throw unprocessable(
+        `Stored approval payload is invalid and cannot be applied: ${parseResult.error.message}`,
+      );
+    }
+    const parsed = parseResult.data;
+    const targetAgent = await agentsSvc.getById(parsed.targetAgentId);
+    if (!targetAgent) throw notFound("Target agent not found");
+    if (targetAgent.companyId !== approval.companyId) {
+      throw unprocessable("Target agent must belong to the same company");
+    }
+
+    const updated = await agentsSvc.update(parsed.targetAgentId, parsed.requestedPatch, {
+      recordRevision: {
+        createdByAgentId: null,
+        createdByUserId: decidedByUserId,
+        source: "approval",
+      },
+    });
+    if (!updated) throw notFound("Target agent not found");
+    return { updated, parsed };
+  }
 
   router.get("/companies/:companyId/approvals", async (req, res) => {
     const companyId = req.params.companyId as string;
@@ -56,20 +132,34 @@ export function approvalRoutes(db: Db) {
   router.post("/companies/:companyId/approvals", validate(createApprovalSchema), async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+
+    // Issue 4 fix: agent_config_change requests can alter any agent's configuration
+    // once board-approved. Restrict submission to agents that have been explicitly
+    // granted the canRequestAgentConfigChange permission (analogous to canCreateAgents).
+    if (req.body.type === "agent_config_change" && req.actor.type === "agent" && req.actor.agentId) {
+      const actorAgent = await agentsSvc.getById(req.actor.agentId);
+      const hasPermission =
+        actorAgent?.role === "ceo"
+        || Boolean((actorAgent?.permissions as Record<string, unknown> | null)?.canRequestAgentConfigChange);
+      if (!hasPermission) {
+        res.status(403).json({
+          error: "Agent does not have permission to submit agent config change approvals",
+        });
+        return;
+      }
+    }
+
     const rawIssueIds = req.body.issueIds;
     const issueIds = Array.isArray(rawIssueIds)
       ? rawIssueIds.filter((value: unknown): value is string => typeof value === "string")
       : [];
     const uniqueIssueIds = Array.from(new Set(issueIds));
     const { issueIds: _issueIds, ...approvalInput } = req.body;
-    const normalizedPayload =
-      approvalInput.type === "hire_agent"
-        ? await secretsSvc.normalizeHireApprovalPayloadForPersistence(
-            companyId,
-            approvalInput.payload,
-            { strictMode: strictSecretsMode },
-          )
-        : approvalInput.payload;
+    const normalizedPayload = await normalizeApprovalPayload(
+      companyId,
+      approvalInput.type,
+      approvalInput.payload,
+    );
 
     const actor = getActorInfo(req);
     const approval = await svc.create(companyId, {
@@ -127,7 +217,26 @@ export function approvalRoutes(db: Db) {
       req.body.decisionNote,
     );
 
+    // Issue 5 fix: svc.approve() has already committed the approval record as
+    // "approved" before we get here (idempotency design). If applyApprovedAgent-
+    // ConfigChange fails (e.g. target agent deleted between creation and approval),
+    // we must not let that throw a 500 — the approval DB state is already final.
+    // Instead, return a 207 with the approved approval and an applicationError so
+    // the caller knows the side-effect didn't fully complete.
+    let applicationError: string | null = null;
+
     if (applied) {
+      let appliedAgentConfigChange: Awaited<ReturnType<typeof applyApprovedAgentConfigChange>> = null;
+      try {
+        appliedAgentConfigChange = await applyApprovedAgentConfigChange(
+          approval,
+          req.body.decidedByUserId ?? "board",
+        );
+      } catch (err) {
+        applicationError = err instanceof Error ? err.message : String(err);
+        logger.warn({ err, approvalId: approval.id }, "apply step failed after approval was committed");
+      }
+
       const linkedIssues = await issueApprovalsSvc.listIssuesForApproval(approval.id);
       const linkedIssueIds = linkedIssues.map((issue) => issue.id);
       const primaryIssueId = linkedIssueIds[0] ?? null;
@@ -143,8 +252,24 @@ export function approvalRoutes(db: Db) {
           type: approval.type,
           requestedByAgentId: approval.requestedByAgentId,
           linkedIssueIds,
+          targetAgentId: appliedAgentConfigChange?.updated.id ?? null,
         },
       });
+
+      if (appliedAgentConfigChange) {
+        await logActivity(db, {
+          companyId: approval.companyId,
+          actorType: "user",
+          actorId: req.actor.userId ?? "board",
+          action: "agent.updated",
+          entityType: "agent",
+          entityId: appliedAgentConfigChange.updated.id,
+          details: {
+            sourceApprovalId: approval.id,
+            changedTopLevelKeys: Object.keys(appliedAgentConfigChange.parsed.requestedPatch).sort(),
+          },
+        });
+      }
 
       if (approval.requestedByAgentId) {
         try {
@@ -210,7 +335,14 @@ export function approvalRoutes(db: Db) {
       }
     }
 
-    res.json(redactApprovalPayload(approval));
+    const responseBody = redactApprovalPayload(approval) as Record<string, unknown>;
+    if (applicationError) {
+      // 207: approval record is saved but side-effect failed.
+      responseBody.applicationError = applicationError;
+      res.status(207).json(responseBody);
+    } else {
+      res.json(responseBody);
+    }
   });
 
   router.post("/approvals/:id/reject", validate(resolveApprovalSchema), async (req, res) => {
@@ -278,13 +410,7 @@ export function approvalRoutes(db: Db) {
     }
 
     const normalizedPayload = req.body.payload
-      ? existing.type === "hire_agent"
-        ? await secretsSvc.normalizeHireApprovalPayloadForPersistence(
-            existing.companyId,
-            req.body.payload,
-            { strictMode: strictSecretsMode },
-          )
-        : req.body.payload
+      ? await normalizeApprovalPayload(existing.companyId, existing.type, req.body.payload)
       : undefined;
     const approval = await svc.resubmit(id, normalizedPayload);
     const actor = getActorInfo(req);

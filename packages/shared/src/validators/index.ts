@@ -186,11 +186,14 @@ export {
 } from "./goal.js";
 
 export {
+  agentConfigChangePatchSchema,
+  agentConfigChangeApprovalPayloadSchema,
   createApprovalSchema,
   resolveApprovalSchema,
   requestApprovalRevisionSchema,
   resubmitApprovalSchema,
   addApprovalCommentSchema,
+  type AgentConfigChangeApprovalPayload,
   type CreateApproval,
   type ResolveApproval,
   type RequestApprovalRevision,

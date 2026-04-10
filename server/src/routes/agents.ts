@@ -297,7 +297,10 @@ export function agentRoutes(db: Db) {
     };
   }
 
-  async function assertCanUpdateAgent(req: Request, targetAgent: { id: string; companyId: string }) {
+  async function assertCanUpdateAgent(
+    req: Request,
+    targetAgent: { id: string; companyId: string },
+  ) {
     assertCompanyAccess(req, targetAgent.companyId);
     if (req.actor.type === "board") return;
     if (!req.actor.agentId) throw forbidden("Agent authentication required");

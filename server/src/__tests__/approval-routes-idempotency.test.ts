@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { approvalRoutes } from "../routes/approvals.js";
 import { errorHandler } from "../middleware/index.js";
 
+const targetAgentId = "22222222-2222-4222-8222-222222222222";
+
 const mockApprovalService = vi.hoisted(() => ({
   list: vi.fn(),
   getById: vi.fn(),
@@ -14,6 +16,11 @@ const mockApprovalService = vi.hoisted(() => ({
   resubmit: vi.fn(),
   listComments: vi.fn(),
   addComment: vi.fn(),
+}));
+
+const mockAgentService = vi.hoisted(() => ({
+  getById: vi.fn(),
+  update: vi.fn(),
 }));
 
 const mockHeartbeatService = vi.hoisted(() => ({
@@ -27,12 +34,14 @@ const mockIssueApprovalService = vi.hoisted(() => ({
 
 const mockSecretService = vi.hoisted(() => ({
   normalizeHireApprovalPayloadForPersistence: vi.fn(),
+  normalizeAdapterConfigForPersistence: vi.fn(),
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
   approvalService: () => mockApprovalService,
+  agentService: () => mockAgentService,
   heartbeatService: () => mockHeartbeatService,
   issueApprovalService: () => mockIssueApprovalService,
   logActivity: mockLogActivity,
@@ -78,9 +87,25 @@ function createAgentApp() {
 describe("approval routes idempotent retries", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAgentService.getById.mockResolvedValue({
+      id: targetAgentId,
+      companyId: "company-1",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+    });
+    mockAgentService.update.mockResolvedValue({
+      id: targetAgentId,
+      companyId: "company-1",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: { heartbeat: { cooldownSec: 300 } },
+    });
     mockHeartbeatService.wakeup.mockResolvedValue({ id: "wake-1" });
     mockIssueApprovalService.listIssuesForApproval.mockResolvedValue([{ id: "issue-1" }]);
     mockLogActivity.mockResolvedValue(undefined);
+    mockSecretService.normalizeHireApprovalPayloadForPersistence.mockImplementation(async (_companyId, payload) => payload);
+    mockSecretService.normalizeAdapterConfigForPersistence.mockImplementation(async (_companyId, payload) => payload);
   });
 
   it("does not emit duplicate approval side effects when approve is already resolved", async () => {
@@ -176,5 +201,84 @@ describe("approval routes idempotent retries", () => {
         action: "approval.created",
       }),
     );
+  });
+
+  it("applies approved agent config change via the server", async () => {
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-2",
+        companyId: "company-1",
+        type: "agent_config_change",
+        status: "approved",
+        payload: {
+          targetAgentId,
+          requestedPatch: {
+            runtimeConfig: {
+              heartbeat: {
+                cooldownSec: 300,
+              },
+            },
+          },
+          reason: "Reduce thrash after repeated failures",
+        },
+        requestedByAgentId: "agent-1",
+      },
+      applied: true,
+    });
+
+    const res = await request(createApp())
+      .post("/api/approvals/approval-2/approve")
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalledWith(
+      targetAgentId,
+      {
+        runtimeConfig: {
+          heartbeat: {
+            cooldownSec: 300,
+          },
+        },
+      },
+      expect.objectContaining({
+        recordRevision: expect.objectContaining({
+          createdByUserId: "board",
+          source: "approval",
+        }),
+      }),
+    );
+    expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-apply agent config change on idempotent approve retry", async () => {
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-3",
+        companyId: "company-1",
+        type: "agent_config_change",
+        status: "approved",
+        payload: {
+          targetAgentId,
+          requestedPatch: {
+            runtimeConfig: {
+              heartbeat: {
+                cooldownSec: 300,
+              },
+            },
+          },
+        },
+        requestedByAgentId: "agent-1",
+      },
+      applied: false,
+    });
+
+    const res = await request(createApp())
+      .post("/api/approvals/approval-3/approve")
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockAgentService.update).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+    expect(mockLogActivity).not.toHaveBeenCalled();
   });
 });

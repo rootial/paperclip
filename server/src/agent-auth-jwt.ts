@@ -18,6 +18,7 @@ export interface LocalAgentJwtClaims {
 }
 
 const JWT_ALGORITHM = "HS256";
+const DEV_FALLBACK_SECRET = "paperclip-dev-secret";
 
 function parseNumber(value: string | undefined, fallback: number) {
   const parsed = Number(value);
@@ -25,12 +26,30 @@ function parseNumber(value: string | undefined, fallback: number) {
   return Math.floor(parsed);
 }
 
+function isProductionMode() {
+  const mode = process.env.PAPERCLIP_DEPLOYMENT_MODE?.toLowerCase();
+  return mode === "production" || mode === "cloud";
+}
+
 function jwtConfig() {
-  const secret = process.env.PAPERCLIP_AGENT_JWT_SECRET?.trim() || process.env.BETTER_AUTH_SECRET?.trim();
-  if (!secret) return null;
+  const configuredSecret = [
+    process.env.PAPERCLIP_AGENT_JWT_SECRET,
+    process.env.BETTER_AUTH_SECRET,
+  ]
+    .map((value) => value?.trim() ?? "")
+    .find((value) => value.length > 0);
+
+  if (!configuredSecret) {
+    // In production, refuse to fall back to the hardcoded dev secret.
+    if (isProductionMode()) return null;
+    // In dev/local, allow the well-known fallback so out-of-the-box setup works.
+  }
+
+  const secret = configuredSecret ?? DEV_FALLBACK_SECRET;
 
   return {
     secret,
+    isDevFallback: !configuredSecret,
     ttlSeconds: parseNumber(process.env.PAPERCLIP_AGENT_JWT_TTL_SECONDS, 60 * 60 * 48),
     issuer: process.env.PAPERCLIP_AGENT_JWT_ISSUER ?? "paperclip",
     audience: process.env.PAPERCLIP_AGENT_JWT_AUDIENCE ?? "paperclip-api",
@@ -122,10 +141,13 @@ export function verifyLocalAgentJwt(token: string): LocalAgentJwtClaims | null {
   const now = Math.floor(Date.now() / 1000);
   if (exp < now) return null;
 
-  const issuer = typeof claims.iss === "string" ? claims.iss : undefined;
-  const audience = typeof claims.aud === "string" ? claims.aud : undefined;
-  if (issuer && issuer !== config.issuer) return null;
-  if (audience && audience !== config.audience) return null;
+  // Issue 1 fix: always require iss and aud when the server has a configured
+  // issuer/audience. Tokens that omit these claims must be rejected — the
+  // previous "only validate when present" logic allowed bypass by omission.
+  const issuer = typeof claims.iss === "string" ? claims.iss : null;
+  const audience = typeof claims.aud === "string" ? claims.aud : null;
+  if (!issuer || issuer !== config.issuer) return null;
+  if (!audience || audience !== config.audience) return null;
 
   return {
     sub,
@@ -134,8 +156,8 @@ export function verifyLocalAgentJwt(token: string): LocalAgentJwtClaims | null {
     run_id: runId,
     iat,
     exp,
-    ...(issuer ? { iss: issuer } : {}),
-    ...(audience ? { aud: audience } : {}),
+    iss: issuer,
+    aud: audience,
     jti: typeof claims.jti === "string" ? claims.jti : undefined,
   };
 }

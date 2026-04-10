@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +59,45 @@ function firstNonEmptyLine(text: string): string {
 function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean {
   const raw = env[key];
   return typeof raw === "string" && raw.trim().length > 0;
+}
+
+function resolvePaperclipLocalJwtSecret(env: NodeJS.ProcessEnv): string | null {
+  const configured = [env.PAPERCLIP_AGENT_JWT_SECRET, env.BETTER_AUTH_SECRET]
+    .map((value) => value?.trim() ?? "")
+    .find((value) => value.length > 0);
+  if (configured) return configured;
+  // In production, refuse to fall back to the hardcoded dev secret.
+  const mode = env.PAPERCLIP_DEPLOYMENT_MODE?.toLowerCase();
+  if (mode === "production" || mode === "cloud") return null;
+  return "paperclip-dev-secret";
+}
+
+function createLocalAgentJwtFallback(
+  agent: { id: string; companyId: string; adapterType: string | null },
+  runId: string,
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const secret = resolvePaperclipLocalJwtSecret(env);
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" }), "utf8").toString("base64url");
+  const claims = Buffer.from(
+    JSON.stringify({
+      sub: agent.id,
+      company_id: agent.companyId,
+      adapter_type: agent.adapterType ?? "unknown",
+      run_id: runId,
+      iat: now,
+      exp: now + 60 * 60 * 48,
+      iss: env.PAPERCLIP_AGENT_JWT_ISSUER ?? "paperclip",
+      aud: env.PAPERCLIP_AGENT_JWT_AUDIENCE ?? "paperclip-api",
+    }),
+    "utf8",
+  ).toString("base64url");
+  const signingInput = `${header}.${claims}`;
+  const signature = createHmac("sha256", secret).update(signingInput).digest("base64url");
+  return `${signingInput}.${signature}`;
 }
 
 function resolveCodexBillingType(env: Record<string, string>): "api" | "subscription" {
@@ -289,6 +329,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
+  const effectiveAuthToken = authToken ?? createLocalAgentJwtFallback(agent, runId, process.env);
   const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
   env.CODEX_HOME = effectiveCodexHome;
   env.PAPERCLIP_RUN_ID = runId;
@@ -379,8 +420,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   for (const [k, v] of Object.entries(envConfig)) {
     if (typeof v === "string") env[k] = v;
   }
-  if (!hasExplicitApiKey && authToken) {
-    env.PAPERCLIP_API_KEY = authToken;
+  if (!hasExplicitApiKey && effectiveAuthToken) {
+    env.PAPERCLIP_API_KEY = effectiveAuthToken;
+    if (!authToken) {
+      await onLog(
+        "stdout",
+        "[paperclip] Generated fallback local agent JWT for PAPERCLIP_API_KEY because the heartbeat did not pass authToken.\n",
+      );
+    }
   }
   const effectiveEnv = Object.fromEntries(
     Object.entries({ ...process.env, ...env }).filter(
