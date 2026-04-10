@@ -116,7 +116,8 @@ const approvalDecisionSchema = z.object({
 
 const createApprovalToolSchema = z.object({
   companyId: companyIdOptional,
-}).merge(createApprovalSchema);
+  ...((createApprovalSchema._def.schema as z.AnyZodObject).shape),
+});
 
 const apiRequestSchema = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
