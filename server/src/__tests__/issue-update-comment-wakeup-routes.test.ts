@@ -99,6 +99,14 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// NOTE: Basic assignment and comment wakeups (issue_assigned, issue_commented) are now
+// fired inside issueService.update / issueService.addComment (service layer) rather than
+// in the route handler. The route mocks the service, so those wakeups do not appear in
+// route-level tests — see issues-service-wakeup.test.ts for service-level regression tests.
+//
+// The route handler still fires: execution-policy stage wakeups, @mention wakeups,
+// and blocker/children-resolved wakeups. Those remain tested below.
+
 describe("issue update comment wakeups", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,12 +116,10 @@ describe("issue update comment wakeups", () => {
     mockIssueService.getWakeableParentAfterChildCompletion.mockResolvedValue(null);
   });
 
-  it("includes the new comment in assignment wakes from issue updates", async () => {
+  it("route does NOT fire a direct assignment wakeup (service layer handles it)", async () => {
+    // Previously the route fired issue_assigned; that logic now lives in issueService.update.
     const existing = makeIssue();
-    const updated = makeIssue({
-      assigneeAgentId: ASSIGNEE_AGENT_ID,
-      assigneeUserId: null,
-    });
+    const updated = makeIssue({ assigneeAgentId: ASSIGNEE_AGENT_ID, assigneeUserId: null });
     mockIssueService.getById.mockResolvedValue(existing);
     mockIssueService.update.mockResolvedValue(updated);
     mockIssueService.addComment.mockResolvedValue({
@@ -132,34 +138,17 @@ describe("issue update comment wakeups", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1);
-    expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
-      ASSIGNEE_AGENT_ID,
-      expect.objectContaining({
-        source: "assignment",
-        reason: "issue_assigned",
-        payload: expect.objectContaining({
-          issueId: existing.id,
-          commentId: "comment-1",
-          mutation: "update",
-        }),
-        contextSnapshot: expect.objectContaining({
-          issueId: existing.id,
-          taskId: existing.id,
-          commentId: "comment-1",
-          wakeCommentId: "comment-1",
-          source: "issue.update",
-        }),
-      }),
+    // Route no longer fires issue_assigned — service layer does (not visible here because
+    // issueService is mocked).
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reason: "issue_assigned" }),
     );
   });
 
-  it("wakes the assignee on comment-only issue updates", async () => {
-    const existing = makeIssue({
-      assigneeAgentId: ASSIGNEE_AGENT_ID,
-      assigneeUserId: null,
-      status: "in_progress",
-    });
+  it("route does NOT fire a comment-only assignee wakeup (service layer handles it)", async () => {
+    // Previously the route fired issue_commented; that logic now lives in issueService.addComment.
+    const existing = makeIssue({ assigneeAgentId: ASSIGNEE_AGENT_ID, assigneeUserId: null, status: "in_progress" });
     const updated = { ...existing };
     mockIssueService.getById.mockResolvedValue(existing);
     mockIssueService.update.mockResolvedValue(updated);
@@ -172,31 +161,37 @@ describe("issue update comment wakeups", () => {
 
     const res = await request(createApp())
       .patch(`/api/issues/${existing.id}`)
-      .send({
-        comment: "please revise this",
-      });
+      .send({ comment: "please revise this" });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reason: "issue_commented" }),
+    );
+  });
+
+  it("route still fires @mention wakeups from PATCH updates with a comment", async () => {
+    const MENTIONED_AGENT_ID = "22222222-2222-4222-8222-222222222222";
+    const existing = makeIssue({ assigneeAgentId: ASSIGNEE_AGENT_ID, assigneeUserId: null, status: "in_review" });
+    const updated = { ...existing };
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-3",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "@SomeAgent please check",
+    });
+    mockIssueService.findMentionedAgents.mockResolvedValue([MENTIONED_AGENT_ID]);
+
+    const res = await request(createApp())
+      .patch(`/api/issues/${existing.id}`)
+      .send({ comment: "@SomeAgent please check" });
+
+    expect(res.status).toBe(200);
     expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
-      ASSIGNEE_AGENT_ID,
-      expect.objectContaining({
-        source: "automation",
-        reason: "issue_commented",
-        payload: expect.objectContaining({
-          issueId: existing.id,
-          commentId: "comment-2",
-          mutation: "comment",
-        }),
-        contextSnapshot: expect.objectContaining({
-          issueId: existing.id,
-          taskId: existing.id,
-          commentId: "comment-2",
-          wakeCommentId: "comment-2",
-          wakeReason: "issue_commented",
-          source: "issue.comment",
-        }),
-      }),
+      MENTIONED_AGENT_ID,
+      expect.objectContaining({ reason: "issue_comment_mentioned" }),
     );
   });
 });

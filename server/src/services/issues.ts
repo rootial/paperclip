@@ -35,6 +35,7 @@ import { instanceSettingsService } from "./instance-settings.js";
 import { redactCurrentUserText } from "../log-redaction.js";
 import { resolveIssueGoalId, resolveNextIssueGoalId } from "./issue-goal-fallback.js";
 import { getDefaultCompanyGoal } from "./goals.js";
+import { queueIssueAssignmentWakeup, type IssueAssignmentWakeupDeps } from "./issue-assignment-wakeup.js";
 
 const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
 const MAX_ISSUE_COMMENT_PAGE_LIMIT = 500;
@@ -536,7 +537,7 @@ function withActiveRuns(
   }));
 }
 
-export function issueService(db: Db) {
+export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupDeps }) {
   const instanceSettings = instanceSettingsService(db);
 
   async function getIssueByUuid(id: string) {
@@ -1693,7 +1694,27 @@ export function issueService(db: Db) {
         return enriched;
       };
 
-      return dbOrTx === db ? db.transaction(runUpdate) : runUpdate(dbOrTx);
+      const result = await (dbOrTx === db ? db.transaction(runUpdate) : runUpdate(dbOrTx));
+
+      // Fire wakeup from service layer so callers that bypass the HTTP route
+      // (e.g. plugin-host-services) also trigger assignee wakeups.
+      if (result && deps?.heartbeat) {
+        const assigneeChanged = result.assigneeAgentId !== existing.assigneeAgentId;
+        const statusChangedFromBacklog = existing.status === "backlog" && result.status !== "backlog";
+        if (result.assigneeAgentId && (assigneeChanged || statusChangedFromBacklog)) {
+          void queueIssueAssignmentWakeup({
+            heartbeat: deps.heartbeat,
+            issue: result,
+            reason: assigneeChanged ? "issue_assigned" : "issue_status_changed",
+            mutation: "update",
+            contextSource: "issues.update",
+            requestedByActorType: data.actorAgentId ? "agent" : "user",
+            requestedByActorId: data.actorAgentId ?? data.actorUserId ?? null,
+          });
+        }
+      }
+
+      return result;
     },
 
     remove: (id: string) =>
@@ -2118,7 +2139,7 @@ export function issueService(db: Db) {
       actor: { agentId?: string; userId?: string; runId?: string | null },
     ) => {
       const issue = await db
-        .select({ companyId: issues.companyId })
+        .select({ companyId: issues.companyId, assigneeAgentId: issues.assigneeAgentId, status: issues.status })
         .from(issues)
         .where(eq(issues.id, issueId))
         .then((rows) => rows[0] ?? null);
@@ -2147,7 +2168,26 @@ export function issueService(db: Db) {
         .set({ updatedAt: new Date() })
         .where(eq(issues.id, issueId));
 
-      return redactIssueComment(comment, currentUserRedactionOptions.enabled);
+      const redactedComment = redactIssueComment(comment, currentUserRedactionOptions.enabled);
+
+      // Fire wakeup so callers that bypass the HTTP route also notify the assignee.
+      if (deps?.heartbeat && issue.assigneeAgentId) {
+        const isClosed = issue.status === "done" || issue.status === "cancelled";
+        const selfComment = !!actor.agentId && actor.agentId === issue.assigneeAgentId;
+        if (!isClosed && !selfComment) {
+          void queueIssueAssignmentWakeup({
+            heartbeat: deps.heartbeat,
+            issue: { id: issueId, assigneeAgentId: issue.assigneeAgentId, status: issue.status },
+            reason: "issue_commented",
+            mutation: "comment",
+            contextSource: "issues.addComment",
+            requestedByActorType: actor.agentId ? "agent" : "user",
+            requestedByActorId: actor.agentId ?? actor.userId ?? null,
+          });
+        }
+      }
+
+      return redactedComment;
     },
 
     createAttachment: async (input: {
