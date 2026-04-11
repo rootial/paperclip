@@ -11,3 +11,19 @@ index 93cddf82..23fb7e72 100644
  /** Regex to extract token usage from Hermes output. */
  const TOKEN_USAGE_REGEX = /tokens?[:\s]+(\d+)\s*(?:input|in)\b.*?(\d+)\s*(?:output|out)\b/i;
  /** Regex to extract cost from Hermes output. */
+@@ -296,9 +296,14 @@ export async function execute(ctx) {
+     if (ctx.runId)
+         env.PAPERCLIP_RUN_ID = ctx.runId;
+-    const taskId = cfgString(ctx.config?.taskId);
++    const taskId = cfgString(ctx.context?.taskId) || cfgString(ctx.context?.issueId) || cfgString(ctx.config?.taskId);
+     if (taskId)
+         env.PAPERCLIP_TASK_ID = taskId;
++    const wakeReason = cfgString(ctx.context?.wakeReason);
++    if (wakeReason)
++        env.PAPERCLIP_WAKE_REASON = wakeReason;
++    const wakeCommentId = cfgString(ctx.context?.wakeCommentId) || cfgString(ctx.context?.commentId);
++    if (wakeCommentId)
++        env.PAPERCLIP_WAKE_COMMENT_ID = wakeCommentId;
+     const userEnv = config.env;
+     if (userEnv && typeof userEnv === "object") {
+         Object.assign(env, userEnv);
