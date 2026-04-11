@@ -1995,12 +1995,29 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
         });
       }
 
+      const nextStatus = (() => {
+        if (existing.status === "done" || existing.status === "cancelled") {
+          return existing.status;
+        }
+        if (existing.status === "in_progress") {
+          if (existing.completedAt && !existing.cancelledAt) return "done";
+          if (existing.cancelledAt && !existing.completedAt) return "cancelled";
+        }
+        return "todo";
+      })();
+
       const updated = await db
         .update(issues)
         .set({
-          status: "todo",
+          status: nextStatus,
           assigneeAgentId: null,
+          assigneeUserId: null,
           checkoutRunId: null,
+          executionRunId: null,
+          executionAgentNameKey: null,
+          executionLockedAt: null,
+          completedAt: nextStatus === "done" ? existing.completedAt : null,
+          cancelledAt: nextStatus === "cancelled" ? existing.cancelledAt : null,
           updatedAt: new Date(),
         })
         .where(eq(issues.id, id))
