@@ -119,8 +119,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const buildCopilotArgs = (resumeSessionId: string | null) => {
     const args = ["-p", prompt, "--output-format", "json", "-s", "--no-color"];
     if (resumeSessionId) args.push(`--resume=${resumeSessionId}`);
-    if (dangerouslySkipPermissions) args.push("--allow-all");
-    else args.push("--allow-all-tools", "--allow-all-paths");
+    // Non-interactive: always allow all tools, paths, and URLs to prevent
+    // confirmation prompts from hanging the agent process. The
+    // dangerouslySkipPermissions flag is kept for forward-compatibility
+    // but has no additional effect currently.
+    args.push("--allow-all");
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
     if (extraArgs.length > 0) args.push(...extraArgs);
