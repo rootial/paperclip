@@ -134,6 +134,7 @@ export const createIssueSchema = z.object({
   executionWorkspacePreference: z.enum(ISSUE_EXECUTION_WORKSPACE_PREFERENCES).optional().nullable(),
   executionWorkspaceSettings: issueExecutionWorkspaceSettingsSchema.optional().nullable(),
   labelIds: z.array(z.string().uuid()).optional(),
+  createdByAgentId: z.string().uuid().optional().nullable(),
 });
 
 export type CreateIssue = z.infer<typeof createIssueSchema>;
@@ -148,6 +149,7 @@ export type CreateIssueLabel = z.infer<typeof createIssueLabelSchema>;
 export const updateIssueSchema = createIssueSchema.partial().extend({
   assigneeAgentId: z.string().trim().min(1).optional().nullable(),
   comment: z.string().min(1).optional(),
+  commentAgentId: z.string().uuid().optional(),
   reopen: z.boolean().optional(),
   interrupt: z.boolean().optional(),
   hiddenAt: z.string().datetime().nullable().optional(),
@@ -167,6 +169,7 @@ export const addIssueCommentSchema = z.object({
   body: z.string().min(1),
   reopen: z.boolean().optional(),
   interrupt: z.boolean().optional(),
+  agentId: z.string().uuid().optional(),
 });
 
 export type AddIssueComment = z.infer<typeof addIssueCommentSchema>;
