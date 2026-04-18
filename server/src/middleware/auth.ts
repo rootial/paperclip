@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Request, RequestHandler } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agentApiKeys, agents, companyMemberships, instanceUserRoles } from "@paperclipai/db";
+import { agentApiKeys, agents, companyMemberships, heartbeatRuns, instanceUserRoles } from "@paperclipai/db";
 import { verifyLocalAgentJwt } from "../agent-auth-jwt.js";
 import type { DeploymentMode } from "@paperclipai/shared";
 import type { BetterAuthSessionResult } from "../auth/better-auth.js";
@@ -71,7 +71,25 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
           return;
         }
       }
-      if (runIdHeader) req.actor.runId = runIdHeader;
+      if (runIdHeader) {
+        req.actor.runId = runIdHeader;
+        if (opts.deploymentMode === "local_trusted") {
+          const run = await db
+            .select({ agentId: heartbeatRuns.agentId, companyId: heartbeatRuns.companyId })
+            .from(heartbeatRuns)
+            .where(eq(heartbeatRuns.id, runIdHeader))
+            .then((rows) => rows[0] ?? null);
+          if (run) {
+            req.actor = {
+              type: "agent",
+              agentId: run.agentId,
+              companyId: run.companyId,
+              runId: runIdHeader,
+              source: "run_id_lookup",
+            };
+          }
+        }
+      }
       next();
       return;
     }

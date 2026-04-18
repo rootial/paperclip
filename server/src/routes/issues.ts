@@ -1265,19 +1265,21 @@ export function issueRoutes(
     }
 
     const actor = getActorInfo(req);
+    const bodyAgentId = req.actor.source === "local_implicit" ? req.body.createdByAgentId : undefined;
+    const effectiveAgentId = actor.agentId ?? bodyAgentId ?? undefined;
     const executionPolicy = normalizeIssueExecutionPolicy(req.body.executionPolicy);
     const issue = await svc.create(companyId, {
       ...req.body,
       executionPolicy,
-      createdByAgentId: actor.agentId,
-      createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+      createdByAgentId: effectiveAgentId ?? null,
+      createdByUserId: (effectiveAgentId) ? null : (actor.actorType === "user" ? actor.actorId : null),
     });
 
     await logActivity(db, {
       companyId,
-      actorType: actor.actorType,
-      actorId: actor.actorId,
-      agentId: actor.agentId,
+      actorType: effectiveAgentId ? "agent" : actor.actorType,
+      actorId: effectiveAgentId ?? actor.actorId,
+      agentId: effectiveAgentId ?? actor.agentId,
       runId: actor.runId,
       action: "issue.created",
       entityType: "issue",
@@ -1636,9 +1638,10 @@ export function issueRoutes(
 
     let comment = null;
     if (commentBody) {
+      const bodyAgentId = req.actor.source === "local_implicit" ? req.body.commentAgentId : undefined;
       comment = await svc.addComment(id, commentBody, {
-        agentId: actor.agentId ?? undefined,
-        userId: actor.actorType === "user" ? actor.actorId : undefined,
+        agentId: actor.agentId ?? bodyAgentId ?? undefined,
+        userId: (actor.agentId || bodyAgentId) ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
         runId: actor.runId,
       });
 
@@ -2155,9 +2158,10 @@ export function issueRoutes(
       }
     }
 
+    const bodyAgentId = req.actor.source === "local_implicit" ? req.body.agentId : undefined;
     const comment = await svc.addComment(id, req.body.body, {
-      agentId: actor.agentId ?? undefined,
-      userId: actor.actorType === "user" ? actor.actorId : undefined,
+      agentId: actor.agentId ?? bodyAgentId ?? undefined,
+      userId: (actor.agentId || bodyAgentId) ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
       runId: actor.runId,
     });
 
