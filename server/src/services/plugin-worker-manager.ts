@@ -60,8 +60,19 @@ const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 /** Hard upper bound for any RPC timeout (5 minutes). Prevents unbounded waits. */
 const MAX_RPC_TIMEOUT_MS = 5 * 60 * 1_000;
 
-/** Timeout for the initialize RPC call. */
-const INITIALIZE_TIMEOUT_MS = 15_000;
+/**
+ * Timeout for the initialize RPC call.
+ *
+ * Why: plugins whose setup performs multi-step remote handshakes (e.g. Discord
+ * gateway connect + slash-command registration) can legitimately exceed the
+ * old 15s limit. Exposed as an env var so ops can tune per deployment without
+ * a code change.
+ */
+const INITIALIZE_TIMEOUT_MS = (() => {
+  const raw = process.env.PAPERCLIP_PLUGIN_INITIALIZE_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+})();
 
 /** Timeout for the shutdown RPC call before escalating to SIGTERM. */
 const SHUTDOWN_DRAIN_MS = 10_000;
