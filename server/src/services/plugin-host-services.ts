@@ -452,7 +452,7 @@ export function buildHostServices(
   const agents = agentService(db);
   const heartbeat = heartbeatService(db);
   const projects = projectService(db);
-  const issues = issueService(db);
+  const issues = issueService(db, { heartbeat });
   const documents = documentService(db);
   const goals = goalService(db);
   const activity = activityService(db);
