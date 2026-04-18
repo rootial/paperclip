@@ -1200,6 +1200,11 @@ export function mergeCoalescedContextSnapshot(
   return merged;
 }
 
+function isCommentRelatedWakeReason(reason: string | null): boolean {
+  if (!reason) return false;
+  return reason.includes("comment") || reason === "issue_reopened_via_comment";
+}
+
 async function buildPaperclipWakePayload(input: {
   db: Db;
   companyId: string;
@@ -1320,7 +1325,10 @@ async function buildPaperclipWakePayload(input: {
       missingCount: missingCommentCount,
     },
     truncated,
-    fallbackFetchNeeded: truncated || missingCommentCount > 0,
+    fallbackFetchNeeded:
+      truncated ||
+      missingCommentCount > 0 ||
+      (commentIds.length === 0 && isCommentRelatedWakeReason(readNonEmptyString(input.contextSnapshot.wakeReason))),
   };
 }
 
