@@ -12,7 +12,7 @@ patchedDependencies:
     hash: 55uhvnotpqyiy37rn3pqpukhei
     path: patches/embedded-postgres@18.1.0-beta.16.patch
   hermes-paperclip-adapter@0.2.0:
-    hash: cyelrvokhrp2ugn27svw5vwd2u
+    hash: 4c55c35puae2jsa4hbmlllm6u4
     path: patches/hermes-paperclip-adapter@0.2.0.patch
 
 importers:
@@ -46,6 +46,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-copilot-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/copilot-local
       '@paperclipai/adapter-cursor-local':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-local
@@ -139,6 +142,25 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+
+  packages/adapters/copilot-local:
+    dependencies:
+      '@paperclipai/adapter-utils':
+        specifier: workspace:*
+        version: link:../../adapter-utils
+      picocolors:
+        specifier: ^1.1.1
+        version: 1.1.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.6.0
+        version: 24.12.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.12.0)(jiti@2.6.1)(jsdom@28.1.0(@noble/hashes@2.0.1))(lightningcss@1.30.2)(tsx@4.21.0)
 
   packages/adapters/cursor-local:
     dependencies:
@@ -474,6 +496,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-copilot-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/copilot-local
       '@paperclipai/adapter-cursor-local':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-local
@@ -533,7 +558,7 @@ importers:
         version: 5.2.1
       hermes-paperclip-adapter:
         specifier: ^0.2.0
-        version: 0.2.0(patch_hash=cyelrvokhrp2ugn27svw5vwd2u)
+        version: 0.2.0(patch_hash=4c55c35puae2jsa4hbmlllm6u4)
       jsdom:
         specifier: ^28.1.0
         version: 28.1.0(@noble/hashes@2.0.1)
@@ -631,6 +656,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-copilot-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/copilot-local
       '@paperclipai/adapter-cursor-local':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-local
@@ -672,7 +700,7 @@ importers:
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       hermes-paperclip-adapter:
         specifier: ^0.2.0
-        version: 0.2.0(patch_hash=cyelrvokhrp2ugn27svw5vwd2u)
+        version: 0.2.0(patch_hash=4c55c35puae2jsa4hbmlllm6u4)
       lexical:
         specifier: 0.35.0
         version: 0.35.0
@@ -10682,7 +10710,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hermes-paperclip-adapter@0.2.0(patch_hash=cyelrvokhrp2ugn27svw5vwd2u):
+  hermes-paperclip-adapter@0.2.0(patch_hash=4c55c35puae2jsa4hbmlllm6u4):
     dependencies:
       '@paperclipai/adapter-utils': 2026.325.0
       picocolors: 1.1.1
