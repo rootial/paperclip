@@ -3091,6 +3091,16 @@ export function heartbeatService(db: Db) {
         continue;
       }
 
+      // Symmetric to the `todo` branch above: if the last run exited cleanly,
+      // the agent chose to stop — it's not a lost execution. Forcing a retry
+      // (and later escalating to `blocked`) would punish agents that simply
+      // forgot to PATCH the issue status after reporting completion via comment.
+      // Leave the issue in `in_progress` so the user/CTO can nudge it manually.
+      if (!latestRun || latestRun.status === "succeeded") {
+        result.skipped += 1;
+        continue;
+      }
+
       if (latestRetryReason === "issue_continuation_needed") {
         const failureSummary = summarizeRunFailureForIssueComment(latestRun);
         const updated = await escalateStrandedAssignedIssue({
