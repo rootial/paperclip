@@ -4234,6 +4234,7 @@ export function heartbeatService(db: Db) {
           identifier: issues.identifier,
           status: issues.status,
           executionRunId: issues.executionRunId,
+          assigneeAgentId: issues.assigneeAgentId,
         })
         .from(issues)
         .where(
@@ -4305,8 +4306,34 @@ export function heartbeatService(db: Db) {
         const deferredContextSeed = parseObject(deferredPayload[DEFERRED_WAKE_CONTEXT_KEY]);
         const promotedContextSeed: Record<string, unknown> = { ...deferredContextSeed };
         const deferredCommentIds = extractWakeCommentIds(deferredContextSeed);
-        const shouldReopenDeferredCommentWake =
-          deferredCommentIds.length > 0 && (issue.status === "done" || issue.status === "cancelled");
+        let shouldReopenDeferredCommentWake = false;
+        if (
+          deferredCommentIds.length > 0 &&
+          (issue.status === "done" || issue.status === "cancelled")
+        ) {
+          const commentAuthors = await tx
+            .select({
+              id: issueComments.id,
+              authorAgentId: issueComments.authorAgentId,
+              authorUserId: issueComments.authorUserId,
+            })
+            .from(issueComments)
+            .where(inArray(issueComments.id, deferredCommentIds));
+
+          // Only reopen if at least one comment is from an external actor.
+          // Skip reopen when all comments are self-authored (by the issue
+          // assignee or the agent being woken) or have been deleted.
+          shouldReopenDeferredCommentWake = commentAuthors.some((c) => {
+            if (c.authorAgentId) {
+              return (
+                c.authorAgentId !== issue.assigneeAgentId &&
+                c.authorAgentId !== deferred.agentId
+              );
+            }
+            // Board / user comments are external — always warrant reopen
+            return !!c.authorUserId;
+          });
+        }
         let reopenedActivity: LogActivityInput | null = null;
 
         if (shouldReopenDeferredCommentWake) {
