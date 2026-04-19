@@ -20,27 +20,32 @@
 COMPANY=f03c3d37-0d2f-45cf-81ff-6ff9301a9f96
 API=http://localhost:3100/api
 
-# 查 issue
+# 查 issue（只读，无需 auth）
 /usr/bin/curl -s "$API/issues/MATA-XX?companyId=$COMPANY"
 
-# 创建 comment（@mention 会自动唤醒 agent）
+# 创建 comment（@mention 会自动唤醒 agent；写操作必须带 auth header）
 /usr/bin/curl -s -X POST "$API/issues/MATA-XX/comments" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"body": "@CTO 请 review"}'
 
-# 手动唤醒 agent
+# 手动唤醒 agent（写操作）
 /usr/bin/curl -s -X POST "$API/agents/<agent-id>/wakeup" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"reason": "...", "source": "on_demand"}'
 
-# 查 heartbeat runs
+# 查 heartbeat runs（只读）
 /usr/bin/curl -s "$API/companies/$COMPANY/heartbeat-runs?agentId=<id>"
 
-# 查所有 issue 树
+# 查所有 issue 树（只读）
 /usr/bin/curl -s "$API/companies/$COMPANY/issues"
 ```
 
-注意：必须用 `/usr/bin/curl` 绕过 rtk 代理，否则返回值会被替换成类型描述。
+注意：
+- 必须用 `/usr/bin/curl` 绕过 rtk 代理，否则返回值会被替换成类型描述
+- 写操作（POST/PATCH/PUT/DELETE）都要挂 `Authorization: Bearer $PAPERCLIP_API_KEY`，否则 `boardMutationGuard` 会返回 403。`PAPERCLIP_API_KEY` 已写入 `~/.config/zsh/.secret`（local_trusted board key，CLI auth-challenge 签出）
+- 缺 key 时 server 会把请求判为匿名 `local_implicit` actor，评论会挂到 `local-board` 用户、`runId=null`，造成 comment 来源混淆
 
 ## Agent 清单
 
