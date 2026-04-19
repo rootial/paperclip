@@ -54,9 +54,21 @@ describe("boardMutationGuard", () => {
     });
   });
 
-  it("allows local implicit board mutations without origin", async () => {
+  it("blocks local implicit board mutations without trusted origin", async () => {
     const app = createApp("board", "local_implicit");
     const res = await request(app).post("/mutate").send({ ok: true });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({
+      error: "Board mutation requires trusted browser origin",
+    });
+  });
+
+  it("allows local implicit board mutations from trusted origin", async () => {
+    const app = createApp("board", "local_implicit");
+    const res = await request(app)
+      .post("/mutate")
+      .set("Origin", "http://localhost:3100")
+      .send({ ok: true });
     expect([200, 204]).toContain(res.status);
   });
 

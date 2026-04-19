@@ -56,13 +56,18 @@ export function boardMutationGuard(): RequestHandler {
       return;
     }
 
-    // Local-trusted mode and board bearer keys are not browser-session requests.
-    // In these modes, origin/referer headers can be absent; do not block those mutations.
-    if (req.actor.source === "local_implicit" || req.actor.source === "board_key") {
+    // Explicit board API keys are unambiguous identity; skip origin check.
+    if (req.actor.source === "board_key") {
       next();
       return;
     }
 
+    // local_implicit is the local_trusted default actor used when no auth
+    // headers were provided. Browser UI still reaches this branch but carries
+    // a matching Origin/Referer; CLI `curl` without Origin falls through to 403.
+    // This forces non-UI local callers to use the MCP tool (which attaches a
+    // run-id header and gets resolved to an agent actor) instead of posting as
+    // an anonymous board user.
     if (!isTrustedBoardMutationRequest(req)) {
       res.status(403).json({ error: "Board mutation requires trusted browser origin" });
       return;
