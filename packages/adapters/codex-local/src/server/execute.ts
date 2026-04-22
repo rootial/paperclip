@@ -31,6 +31,14 @@ const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
   /^\d{4}-\d{2}-\d{2}T[^\s]+\s+ERROR\s+codex_core::rollout::list:\s+state db missing rollout path for thread\s+[a-z0-9-]+$/i;
 
+const PAPERCLIP_API_WRITE_PROMPT = [
+  "Paperclip API write rules:",
+  "- Mutating issue API requests must include Authorization: Bearer $PAPERCLIP_API_KEY.",
+  "- Mutating issue API requests must include X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID.",
+  "- Use $PAPERCLIP_TASK_ID for the current issue when it is set.",
+  "- PAPERCLIP_AGENT_ID is your agent identity for logs and local self-checks; the bearer token remains the source of truth for auth.",
+].join("\n");
+
 function stripCodexRolloutNoise(text: string): string {
   const parts = text.split(/\r?\n/);
   const kept: string[] = [];
@@ -518,6 +526,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const prompt = joinPromptSections([
     promptInstructionsPrefix,
     renderedBootstrapPrompt,
+    PAPERCLIP_API_WRITE_PROMPT,
     wakePrompt,
     sessionHandoffNote,
     renderedPrompt,

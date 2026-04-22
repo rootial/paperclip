@@ -10,6 +10,7 @@ export interface IssueTimelineEvent {
   createdAt: Date | string;
   actorType: ActivityEvent["actorType"];
   actorId: string;
+  runAgentId?: string | null;
   statusChange?: {
     from: string | null;
     to: string | null;
@@ -64,6 +65,7 @@ export function extractIssueTimelineEvents(activity: ActivityEvent[] | null | un
       createdAt: event.createdAt,
       actorType: event.actorType,
       actorId: event.actorId,
+      runAgentId: event.runAgentId ?? null,
     };
 
     if (hasOwn(details, "status")) {

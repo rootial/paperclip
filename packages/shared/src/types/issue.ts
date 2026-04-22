@@ -236,6 +236,9 @@ export interface IssueComment {
   issueId: string;
   authorAgentId: string | null;
   authorUserId: string | null;
+  createdByRunId?: string | null;
+  runId?: string | null;
+  runAgentId?: string | null;
   body: string;
   createdAt: Date;
   updatedAt: Date;

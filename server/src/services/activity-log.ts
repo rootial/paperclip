@@ -36,20 +36,47 @@ export interface LogActivityInput {
   details?: Record<string, unknown> | null;
 }
 
-async function resolveActivityRunId(db: Db, runId: string | null | undefined) {
+type ResolvedActivityRun = {
+  id: string;
+  agentId: string;
+};
+
+async function resolveActivityRun(db: Db, runId: string | null | undefined): Promise<ResolvedActivityRun | null> {
   const candidate = runId?.trim() ?? "";
   if (!candidate || !UUID_RE.test(candidate)) return null;
 
   const existing = await db
-    .select({ id: heartbeatRuns.id })
+    .select({ id: heartbeatRuns.id, agentId: heartbeatRuns.agentId })
     .from(heartbeatRuns)
     .where(eq(heartbeatRuns.id, candidate))
     .then((rows) => rows[0] ?? null);
 
-  if (existing) return existing.id;
+  if (existing) return existing;
 
   logger.warn({ runId: candidate }, "dropping activity log runId because heartbeat run does not exist");
   return null;
+}
+
+function normalizeActivityActor(
+  input: LogActivityInput,
+  resolvedRun: ResolvedActivityRun | null,
+) {
+  const runAgentId = resolvedRun?.agentId ?? null;
+  if (input.actorType === "user" && input.actorId === "local-board" && runAgentId) {
+    return {
+      actorType: "agent" as const,
+      actorId: runAgentId,
+      agentId: runAgentId,
+      runId: resolvedRun?.id ?? null,
+    };
+  }
+
+  return {
+    actorType: input.actorType,
+    actorId: input.actorId,
+    agentId: input.agentId ?? runAgentId,
+    runId: resolvedRun?.id ?? null,
+  };
 }
 
 export async function logActivity(db: Db, input: LogActivityInput) {
@@ -60,16 +87,17 @@ export async function logActivity(db: Db, input: LogActivityInput) {
   const redactedDetails = sanitizedDetails
     ? redactCurrentUserValue(sanitizedDetails, currentUserRedactionOptions)
     : null;
-  const runId = await resolveActivityRunId(db, input.runId);
+  const resolvedRun = await resolveActivityRun(db, input.runId);
+  const normalizedActor = normalizeActivityActor(input, resolvedRun);
   await db.insert(activityLog).values({
     companyId: input.companyId,
-    actorType: input.actorType,
-    actorId: input.actorId,
+    actorType: normalizedActor.actorType,
+    actorId: normalizedActor.actorId,
     action: input.action,
     entityType: input.entityType,
     entityId: input.entityId,
-    agentId: input.agentId ?? null,
-    runId,
+    agentId: normalizedActor.agentId ?? null,
+    runId: normalizedActor.runId,
     details: redactedDetails,
   });
 
@@ -77,13 +105,13 @@ export async function logActivity(db: Db, input: LogActivityInput) {
     companyId: input.companyId,
     type: "activity.logged",
     payload: {
-      actorType: input.actorType,
-      actorId: input.actorId,
+      actorType: normalizedActor.actorType,
+      actorId: normalizedActor.actorId,
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,
-      agentId: input.agentId ?? null,
-      runId,
+      agentId: normalizedActor.agentId ?? null,
+      runId: normalizedActor.runId,
       details: redactedDetails,
     },
   });
@@ -93,15 +121,15 @@ export async function logActivity(db: Db, input: LogActivityInput) {
       eventId: randomUUID(),
       eventType: input.action as PluginEventType,
       occurredAt: new Date().toISOString(),
-      actorId: input.actorId,
-      actorType: input.actorType,
+      actorId: normalizedActor.actorId,
+      actorType: normalizedActor.actorType,
       entityId: input.entityId,
       entityType: input.entityType,
       companyId: input.companyId,
       payload: {
         ...redactedDetails,
-        agentId: input.agentId ?? null,
-        runId,
+        agentId: normalizedActor.agentId ?? null,
+        runId: normalizedActor.runId,
       },
     };
     void _pluginEventBus.emit(event).then(({ errors }) => {

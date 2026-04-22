@@ -153,11 +153,13 @@ function isClosedIssueStatus(status: string | null | undefined): status is "done
 function shouldImplicitlyReopenCommentForAgent(input: {
   issueStatus: string | null | undefined;
   assigneeAgentId: string | null | undefined;
+  actorAgentId?: string | null;
   actorType: "agent" | "user";
   actorId: string;
 }) {
   if (!isClosedIssueStatus(input.issueStatus)) return false;
   if (typeof input.assigneeAgentId !== "string" || input.assigneeAgentId.length === 0) return false;
+  if (typeof input.actorAgentId === "string" && input.actorAgentId === input.assigneeAgentId) return false;
   if (input.actorType === "agent" && input.actorId === input.assigneeAgentId) return false;
   return true;
 }
@@ -1387,6 +1389,11 @@ export function issueRoutes(
 
     const actor = getActorInfo(req);
     const isClosed = isClosedIssueStatus(existing.status);
+    const patchCommentAgentId =
+      req.actor.source === "local_implicit" && typeof req.body.commentAgentId === "string"
+        ? req.body.commentAgentId
+        : null;
+    const effectiveCommentAgentId = actor.agentId ?? patchCommentAgentId;
     const normalizedAssigneeAgentId = await normalizeIssueAssigneeAgentReference(
       existing.companyId,
       req.body.assigneeAgentId as string | null | undefined,
@@ -1410,6 +1417,7 @@ export function issueRoutes(
         shouldImplicitlyReopenCommentForAgent({
           issueStatus: existing.status,
           assigneeAgentId: requestedAssigneeAgentId,
+          actorAgentId: effectiveCommentAgentId,
           actorType: actor.actorType,
           actorId: actor.actorId,
         }));
@@ -1731,10 +1739,9 @@ export function issueRoutes(
 
     let comment = null;
     if (commentBody) {
-      const bodyAgentId = req.actor.source === "local_implicit" ? req.body.commentAgentId : undefined;
       comment = await svc.addComment(id, commentBody, {
-        agentId: actor.agentId ?? bodyAgentId ?? undefined,
-        userId: (actor.agentId || bodyAgentId) ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
+        agentId: effectiveCommentAgentId ?? undefined,
+        userId: effectiveCommentAgentId ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
         runId: actor.runId,
       });
 
@@ -1844,8 +1851,11 @@ export function issueRoutes(
 
       if (commentBody && comment) {
         const assigneeId = issue.assigneeAgentId;
-        const actorIsAgent = actor.actorType === "agent";
-        const selfComment = actorIsAgent && actor.actorId === assigneeId;
+        const commentAgentId =
+          (typeof comment.runAgentId === "string" && comment.runAgentId) ||
+          (typeof comment.authorAgentId === "string" && comment.authorAgentId) ||
+          null;
+        const selfComment = !!commentAgentId && commentAgentId === assigneeId;
         const skipAssigneeCommentWake = selfComment || isClosed;
 
         if (assigneeId && !assigneeChanged && (reopened || !skipAssigneeCommentWake)) {
@@ -2331,17 +2341,23 @@ export function issueRoutes(
     }
 
     const actor = getActorInfo(req);
+    const postCommentAgentId =
+      req.actor.source === "local_implicit" && typeof req.body.agentId === "string"
+        ? req.body.agentId
+        : null;
+    const effectiveCommentAgentId = actor.agentId ?? postCommentAgentId;
     const reopenRequested = req.body.reopen === true;
     const interruptRequested = req.body.interrupt === true;
     const isClosed = isClosedIssueStatus(issue.status);
     const effectiveReopenRequested =
       reopenRequested ||
-      shouldImplicitlyReopenCommentForAgent({
-        issueStatus: issue.status,
-        assigneeAgentId: issue.assigneeAgentId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-      });
+        shouldImplicitlyReopenCommentForAgent({
+          issueStatus: issue.status,
+          assigneeAgentId: issue.assigneeAgentId,
+          actorAgentId: effectiveCommentAgentId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+        });
     let reopened = false;
     let reopenFromStatus: string | null = null;
     let interruptedRunId: string | null = null;
@@ -2402,10 +2418,9 @@ export function issueRoutes(
       }
     }
 
-    const bodyAgentId = req.actor.source === "local_implicit" ? req.body.agentId : undefined;
     const comment = await svc.addComment(id, req.body.body, {
-      agentId: actor.agentId ?? bodyAgentId ?? undefined,
-      userId: (actor.agentId || bodyAgentId) ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
+      agentId: effectiveCommentAgentId ?? undefined,
+      userId: effectiveCommentAgentId ? undefined : (actor.actorType === "user" ? actor.actorId : undefined),
       runId: actor.runId,
     });
 
@@ -2437,8 +2452,11 @@ export function issueRoutes(
     void (async () => {
       const wakeups = new Map<string, Parameters<typeof heartbeat.wakeup>[1]>();
       const assigneeId = currentIssue.assigneeAgentId;
-      const actorIsAgent = actor.actorType === "agent";
-      const selfComment = actorIsAgent && actor.actorId === assigneeId;
+      const commentAgentId =
+        (typeof comment.runAgentId === "string" && comment.runAgentId) ||
+        (typeof comment.authorAgentId === "string" && comment.authorAgentId) ||
+        null;
+      const selfComment = !!commentAgentId && commentAgentId === assigneeId;
       const skipWake = selfComment || isClosed;
       if (assigneeId && (reopened || !skipWake)) {
         if (reopened) {
@@ -2501,7 +2519,7 @@ export function issueRoutes(
 
       for (const mentionedId of mentionedIds) {
         if (wakeups.has(mentionedId)) continue;
-        if (actorIsAgent && actor.actorId === mentionedId) continue;
+        if (commentAgentId && commentAgentId === mentionedId) continue;
         wakeups.set(mentionedId, {
           source: "automation",
           triggerDetail: "system",

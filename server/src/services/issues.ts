@@ -587,6 +587,16 @@ function withActiveRuns(
 export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupDeps }) {
   const instanceSettings = instanceSettingsService(db);
 
+  async function resolveRunAgentId(runId: string | null | undefined) {
+    if (!runId) return null;
+    const run = await db
+      .select({ agentId: heartbeatRuns.agentId })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
+    return run?.agentId ?? null;
+  }
+
   async function getIssueByUuid(id: string) {
     const row = await db
       .select()
@@ -613,6 +623,22 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
     return {
       ...comment,
       body: redactCurrentUserText(comment.body, { enabled: censorUsernameInLogs }),
+    };
+  }
+
+  function issueCommentSelection() {
+    return {
+      id: issueComments.id,
+      companyId: issueComments.companyId,
+      issueId: issueComments.issueId,
+      authorAgentId: issueComments.authorAgentId,
+      authorUserId: issueComments.authorUserId,
+      createdByRunId: issueComments.createdByRunId,
+      runId: heartbeatRuns.id,
+      runAgentId: heartbeatRuns.agentId,
+      body: issueComments.body,
+      createdAt: issueComments.createdAt,
+      updatedAt: issueComments.updatedAt,
     };
   }
 
@@ -2144,8 +2170,9 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
       }
 
       const query = db
-        .select()
+        .select(issueCommentSelection())
         .from(issueComments)
+        .leftJoin(heartbeatRuns, eq(issueComments.createdByRunId, heartbeatRuns.id))
         .where(and(...conditions))
         .orderBy(
           order === "asc" ? asc(issueComments.createdAt) : desc(issueComments.createdAt),
@@ -2188,8 +2215,9 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
     getComment: (commentId: string) =>
       instanceSettings.getGeneral().then(({ censorUsernameInLogs }) =>
         db
-        .select()
+        .select(issueCommentSelection())
         .from(issueComments)
+        .leftJoin(heartbeatRuns, eq(issueComments.createdByRunId, heartbeatRuns.id))
         .where(eq(issueComments.id, commentId))
         .then((rows) => {
           const comment = rows[0] ?? null;
@@ -2235,13 +2263,14 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
         enabled: (await instanceSettings.getGeneral()).censorUsernameInLogs,
       };
       const redactedBody = redactCurrentUserText(body, currentUserRedactionOptions);
+      const runAgentId = actor.agentId ?? await resolveRunAgentId(actor.runId);
       const [comment] = await db
         .insert(issueComments)
         .values({
           companyId: issue.companyId,
           issueId,
-          authorAgentId: actor.agentId ?? null,
-          authorUserId: actor.userId ?? null,
+          authorAgentId: runAgentId ?? null,
+          authorUserId: runAgentId ? null : (actor.userId ?? null),
           createdByRunId: actor.runId ?? null,
           body: redactedBody,
         })
@@ -2254,11 +2283,18 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
         .where(eq(issues.id, issueId));
 
       const redactedComment = redactIssueComment(comment, currentUserRedactionOptions.enabled);
+      const commentWithRun = {
+        ...redactedComment,
+        authorAgentId: redactedComment.authorAgentId ?? runAgentId ?? null,
+        authorUserId: (redactedComment.authorAgentId ?? runAgentId) ? null : redactedComment.authorUserId,
+        runId: actor.runId ?? null,
+        runAgentId,
+      };
 
       // Fire wakeup so callers that bypass the HTTP route also notify the assignee.
       if (deps?.heartbeat && issue.assigneeAgentId) {
         const isClosed = issue.status === "done" || issue.status === "cancelled";
-        const selfComment = !!actor.agentId && actor.agentId === issue.assigneeAgentId;
+        const selfComment = !!runAgentId && runAgentId === issue.assigneeAgentId;
         if (!isClosed && !selfComment) {
           void queueIssueAssignmentWakeup({
             heartbeat: deps.heartbeat,
@@ -2272,7 +2308,7 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
         }
       }
 
-      return redactedComment;
+      return commentWithRun;
     },
 
     createAttachment: async (input: {

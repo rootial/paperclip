@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { activityLog, agents, heartbeatRuns, issues } from "@paperclipai/db";
+import type { ActivityEvent } from "@paperclipai/shared";
 
 export interface ActivityFilters {
   companyId: string;
@@ -79,6 +80,28 @@ export function activityService(db: Db) {
     end
   `.as("resultJson");
 
+  function normalizeActivityEvent(
+    event: typeof activityLog.$inferSelect,
+    runAgentId: string | null,
+  ): ActivityEvent {
+    if (event.actorType === "user" && event.actorId === "local-board" && runAgentId) {
+      return {
+        ...event,
+        actorType: "agent",
+        actorId: runAgentId,
+        agentId: runAgentId,
+        runAgentId,
+      };
+    }
+
+    return {
+      ...event,
+      actorType: event.actorType as ActivityEvent["actorType"],
+      agentId: event.agentId ?? runAgentId,
+      runAgentId,
+    };
+  }
+
   return {
     list: (filters: ActivityFilters) => {
       const conditions = [eq(activityLog.companyId, filters.companyId)];
@@ -94,7 +117,7 @@ export function activityService(db: Db) {
       }
 
       return db
-        .select({ activityLog })
+        .select({ activityLog, runAgentId: heartbeatRuns.agentId })
         .from(activityLog)
         .leftJoin(
           issues,
@@ -103,6 +126,7 @@ export function activityService(db: Db) {
             eq(activityLog.entityId, issueIdAsText),
           ),
         )
+        .leftJoin(heartbeatRuns, eq(activityLog.runId, heartbeatRuns.id))
         .where(
           and(
             ...conditions,
@@ -113,20 +137,22 @@ export function activityService(db: Db) {
           ),
         )
         .orderBy(desc(activityLog.createdAt))
-        .then((rows) => rows.map((r) => r.activityLog));
+        .then((rows) => rows.map((r) => normalizeActivityEvent(r.activityLog, r.runAgentId ?? null)));
     },
 
     forIssue: (issueId: string) =>
       db
-        .select()
+        .select({ activityLog, runAgentId: heartbeatRuns.agentId })
         .from(activityLog)
+        .leftJoin(heartbeatRuns, eq(activityLog.runId, heartbeatRuns.id))
         .where(
           and(
             eq(activityLog.entityType, "issue"),
             eq(activityLog.entityId, issueId),
           ),
         )
-        .orderBy(desc(activityLog.createdAt)),
+        .orderBy(desc(activityLog.createdAt))
+        .then((rows) => rows.map((r) => normalizeActivityEvent(r.activityLog, r.runAgentId ?? null))),
 
     runsForIssue: (companyId: string, issueId: string) =>
       db

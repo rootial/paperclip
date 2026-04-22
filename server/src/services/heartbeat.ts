@@ -4326,6 +4326,7 @@ export function heartbeatService(db: Db) {
               id: issueComments.id,
               authorAgentId: issueComments.authorAgentId,
               authorUserId: issueComments.authorUserId,
+              createdByRunId: issueComments.createdByRunId,
             })
             .from(issueComments)
             .where(inArray(issueComments.id, deferredCommentIds));
@@ -4334,6 +4335,11 @@ export function heartbeatService(db: Db) {
           // Skip reopen when all comments are self-authored (by the issue
           // assignee or the agent being woken) or have been deleted.
           shouldReopenDeferredCommentWake = commentAuthors.some((c) => {
+            // Comments emitted by a heartbeat run are part of automation flow.
+            // Review/approval comments already carry their own status updates,
+            // so promoting their deferred wakes should not bounce a closed
+            // issue back open.
+            if (c.createdByRunId) return false;
             if (c.authorAgentId) {
               return (
                 c.authorAgentId !== issue.assigneeAgentId &&

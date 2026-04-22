@@ -8,6 +8,7 @@ const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
   update: vi.fn(),
   addComment: vi.fn(),
+  assertCheckoutOwner: vi.fn(async () => ({ adoptedFromRunId: null })),
   findMentionedAgents: vi.fn(),
   getRelationSummaries: vi.fn(),
   listWakeableBlockedDependents: vi.fn(),
@@ -112,12 +113,15 @@ async function createApp() {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
+    const runIdHeader = req.headers["x-paperclip-run-id"];
+    const runId = Array.isArray(runIdHeader) ? runIdHeader[0] : runIdHeader;
     (req as any).actor = {
       type: "board",
       userId: "local-board",
       companyIds: ["company-1"],
       source: "local_implicit",
       isInstanceAdmin: false,
+      ...(runId ? { runId } : {}),
     };
     next();
   });
@@ -251,5 +255,35 @@ describe("issue update comment wakeups", () => {
         }),
       }),
     );
+  });
+
+  it("does not wake the assignee on comment-only updates from the assignee run", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "in_progress",
+    });
+    const updated = { ...existing };
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-3",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "status: completed",
+      createdByRunId: "run-1",
+      runId: "run-1",
+      runAgentId: ASSIGNEE_AGENT_ID,
+    });
+
+    const res = await request(await createApp())
+      .patch(`/api/issues/${existing.id}`)
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({
+        comment: "status: completed",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
   });
 });

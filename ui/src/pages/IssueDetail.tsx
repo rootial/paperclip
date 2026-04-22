@@ -253,8 +253,9 @@ function mergeOptimisticFeedbackVote(
 }
 
 function ActorIdentity({ evt, agentMap, userProfileMap }: { evt: ActivityEvent; agentMap: Map<string, Agent>; userProfileMap?: Map<string, import("../lib/company-members").CompanyUserProfile> }) {
-  const id = evt.actorId;
-  if (evt.actorType === "agent") {
+  const agentId = evt.actorType === "agent" ? evt.actorId : evt.runAgentId ?? null;
+  const id = agentId ?? evt.actorId;
+  if (agentId) {
     const agent = agentMap.get(id);
     return <Identity name={agent?.name ?? id.slice(0, 8)} size="sm" />;
   }

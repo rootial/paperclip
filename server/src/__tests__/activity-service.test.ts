@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { agents, companies, createDb, heartbeatRuns } from "@paperclipai/db";
+import { activityLog, agents, companies, createDb, heartbeatRuns, issues } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -26,6 +26,8 @@ describeEmbeddedPostgres("activity service", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(activityLog);
+    await db.delete(issues);
     await db.delete(heartbeatRuns);
     await db.delete(agents);
     await db.delete(companies);
@@ -111,6 +113,79 @@ describeEmbeddedPostgres("activity service", () => {
       costUsd: 0.42,
       cost_usd: 0.42,
       total_cost_usd: 0.42,
+    });
+  });
+
+  it("normalizes historical local-board run activity back to the run agent", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+    const runId = randomUUID();
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Quant Researcher",
+      role: "researcher",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Activity actor normalization",
+      status: "in_progress",
+      priority: "high",
+      issueNumber: 1,
+      identifier: `${issuePrefix}-1`,
+      originKind: "manual",
+      createdByUserId: "local-board",
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      status: "succeeded",
+      contextSnapshot: { issueId },
+    });
+
+    await db.insert(activityLog).values({
+      companyId,
+      actorType: "user",
+      actorId: "local-board",
+      action: "issue.updated",
+      entityType: "issue",
+      entityId: issueId,
+      runId,
+      details: {
+        status: "in_review",
+        _previous: { status: "in_progress" },
+      },
+    });
+
+    const events = await activityService(db).forIssue(issueId);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      actorType: "agent",
+      actorId: agentId,
+      agentId,
+      runId,
+      runAgentId: agentId,
     });
   });
 });

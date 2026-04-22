@@ -803,6 +803,9 @@ describe("codex execute", () => {
       expect(capture.codexHome).toBe(isolatedCodexHome);
       expect(capture.argv).toEqual(expect.arrayContaining(["exec", "--json", "-"]));
       expect(capture.prompt).toContain("Follow the paperclip heartbeat.");
+      expect(capture.prompt).toContain("Authorization: Bearer $PAPERCLIP_API_KEY");
+      expect(capture.prompt).toContain("X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID");
+      expect(capture.prompt).toContain("Use $PAPERCLIP_TASK_ID for the current issue");
       expect(capture.paperclipEnvKeys).toEqual(
         expect.arrayContaining([
           "PAPERCLIP_AGENT_ID",

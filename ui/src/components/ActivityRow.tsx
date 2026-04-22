@@ -44,8 +44,9 @@ export function ActivityRow({ event, agentMap, userProfileMap, entityNameMap, en
     ? `/agents/${heartbeatAgentId}/runs/${event.entityId}`
     : entityLink(event.entityType, event.entityId, name);
 
-  const actor = event.actorType === "agent" ? agentMap.get(event.actorId) : null;
-  const userProfile = event.actorType === "user" ? userProfileMap?.get(event.actorId) : null;
+  const effectiveAgentId = event.actorType === "agent" ? event.actorId : event.runAgentId ?? null;
+  const actor = effectiveAgentId ? agentMap.get(effectiveAgentId) : null;
+  const userProfile = !effectiveAgentId && event.actorType === "user" ? userProfileMap?.get(event.actorId) : null;
   const actorName = actor?.name ?? (event.actorType === "system" ? "System" : userProfile?.label ?? (event.actorType === "user" ? "Board" : event.actorId || "Unknown"));
   const actorAvatarUrl = userProfile?.image ?? null;
 

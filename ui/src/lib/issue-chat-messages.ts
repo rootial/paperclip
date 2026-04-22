@@ -272,8 +272,9 @@ function authorNameForComment(
   currentUserId?: string | null,
   userLabelMap?: ReadonlyMap<string, string> | null,
 ) {
-  if (comment.authorAgentId) {
-    return agentMap?.get(comment.authorAgentId)?.name ?? comment.authorAgentId.slice(0, 8);
+  const effectiveAgentId = comment.authorAgentId ?? comment.runAgentId ?? null;
+  if (effectiveAgentId) {
+    return agentMap?.get(effectiveAgentId)?.name ?? effectiveAgentId.slice(0, 8);
   }
   const authorUserId = comment.authorUserId ?? null;
   if (!authorUserId) return "You";
@@ -297,16 +298,17 @@ function createCommentMessage(args: {
   const { comment, agentMap, currentUserId, userLabelMap, companyId, projectId } = args;
   const createdAt = toDate(comment.createdAt);
   const authorName = authorNameForComment(comment, agentMap, currentUserId, userLabelMap);
+  const effectiveAgentId = comment.authorAgentId ?? comment.runAgentId ?? null;
   const custom = {
     kind: "comment",
     commentId: comment.id,
     anchorId: `comment-${comment.id}`,
     authorName,
-    authorAgentId: comment.authorAgentId,
+    authorAgentId: effectiveAgentId,
     authorUserId: comment.authorUserId,
     companyId: companyId ?? comment.companyId,
     projectId: projectId ?? null,
-    runId: comment.runId ?? null,
+    runId: comment.runId ?? comment.createdByRunId ?? null,
     runAgentId: comment.runAgentId ?? null,
     clientStatus: comment.clientStatus ?? null,
     queueState: comment.queueState ?? null,
@@ -314,7 +316,7 @@ function createCommentMessage(args: {
     interruptedRunId: comment.interruptedRunId ?? null,
   };
 
-  if (comment.authorAgentId) {
+  if (effectiveAgentId) {
     const message: ThreadAssistantMessage = {
       id: comment.id,
       role: "assistant",
@@ -344,8 +346,9 @@ function createTimelineEventMessage(args: {
   userLabelMap?: ReadonlyMap<string, string> | null;
 }) {
   const { event, agentMap, currentUserId, userLabelMap } = args;
-  const actorName = event.actorType === "agent"
-    ? (agentMap?.get(event.actorId)?.name ?? event.actorId.slice(0, 8))
+  const effectiveAgentId = event.actorType === "agent" ? event.actorId : event.runAgentId ?? null;
+  const actorName = effectiveAgentId
+    ? (agentMap?.get(effectiveAgentId)?.name ?? effectiveAgentId.slice(0, 8))
     : event.actorType === "system"
       ? "System"
       : (formatAssigneeUserLabel(event.actorId, currentUserId, userLabelMap) ?? "Board");
@@ -377,8 +380,9 @@ function createTimelineEventMessage(args: {
         anchorId: `activity-${event.id}`,
         eventId: event.id,
         actorName,
-        actorType: event.actorType,
-        actorId: event.actorId,
+        actorType: effectiveAgentId ? "agent" : event.actorType,
+        actorId: effectiveAgentId ?? event.actorId,
+        runAgentId: event.runAgentId ?? null,
         statusChange: event.statusChange ?? null,
         assigneeChange: event.assigneeChange ?? null,
       },

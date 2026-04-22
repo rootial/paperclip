@@ -4,6 +4,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { createUiDevWatchOptions } from "./src/lib/vite-watch";
 
+function resolveApiProxyTarget() {
+  const configured =
+    process.env.PAPERCLIP_UI_PROXY_TARGET?.trim()
+    || process.env.PAPERCLIP_API_URL?.trim();
+  return configured && configured.length > 0 ? configured : "http://localhost:3101";
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   build: {
@@ -27,7 +34,7 @@ export default defineConfig(({ mode }) => ({
     watch: createUiDevWatchOptions(process.cwd()),
     proxy: {
       "/api": {
-        target: "http://localhost:3100",
+        target: resolveApiProxyTarget(),
         ws: true,
       },
     },

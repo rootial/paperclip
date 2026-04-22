@@ -614,4 +614,76 @@ describe("stabilizeThreadMessages", () => {
 
     expect(secondStable.messages).toBe(firstStable.messages);
   });
+
+  it("renders run-linked local-board comments as agent messages when runAgentId is present", () => {
+    const agentMap = new Map([["agent-1", createAgent("agent-1", "Quant Developer")]]);
+
+    const messages = buildIssueChatMessages({
+      comments: [
+        createComment({
+          authorUserId: "local-board",
+          createdByRunId: "run-1",
+          runId: "run-1",
+          runAgentId: "agent-1",
+          body: "Status restored by run",
+        }),
+      ],
+      timelineEvents: [],
+      linkedRuns: [],
+      liveRuns: [],
+      currentUserId: "local-board",
+      agentMap,
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      metadata: {
+        custom: expect.objectContaining({
+          authorAgentId: "agent-1",
+          authorName: "Quant Developer",
+          runId: "run-1",
+          runAgentId: "agent-1",
+        }),
+      },
+    });
+  });
+
+  it("renders run-linked local-board timeline activity as agent messages when runAgentId is present", () => {
+    const agentMap = new Map([["agent-1", createAgent("agent-1", "CTO")]]);
+
+    const messages = buildIssueChatMessages({
+      comments: [],
+      timelineEvents: [
+        {
+          id: "event-1",
+          createdAt: new Date("2026-04-06T12:00:00.000Z"),
+          actorType: "user",
+          actorId: "local-board",
+          runAgentId: "agent-1",
+          statusChange: {
+            from: "in_progress",
+            to: "done",
+          },
+        },
+      ],
+      linkedRuns: [],
+      liveRuns: [],
+      currentUserId: "local-board",
+      agentMap,
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "system",
+      metadata: {
+        custom: expect.objectContaining({
+          actorType: "agent",
+          actorId: "agent-1",
+          actorName: "CTO",
+          runAgentId: "agent-1",
+        }),
+      },
+    });
+  });
 });

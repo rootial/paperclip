@@ -13,6 +13,13 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function summarizeBearerFailure(token: string) {
+  if (!token.trim()) return "empty_token";
+  const parts = token.split(".");
+  if (parts.length !== 3) return "not_jwt_shape";
+  return "jwt_rejected";
+}
+
 interface ActorMiddlewareOptions {
   deploymentMode: DeploymentMode;
   resolveSession?: (req: Request) => Promise<BetterAuthSessionResult | null>;
@@ -21,17 +28,18 @@ interface ActorMiddlewareOptions {
 export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHandler {
   const boardAuth = boardAuthService(db);
   return async (req, _res, next) => {
-    req.actor =
+    const localImplicitBoardActor =
       opts.deploymentMode === "local_trusted"
         ? {
-            type: "board",
+            type: "board" as const,
             userId: "local-board",
             userName: "Local Board",
             userEmail: null,
             isInstanceAdmin: true,
-            source: "local_implicit",
+            source: "local_implicit" as const,
           }
-        : { type: "none", source: "none" };
+        : null;
+    req.actor = localImplicitBoardActor ?? { type: "none", source: "none" };
 
     const runIdHeader = req.header("x-paperclip-run-id");
 
@@ -110,6 +118,7 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
 
     const token = authHeader.slice("bearer ".length).trim();
     if (!token) {
+      req.actor = { type: "none", source: "none" };
       next();
       return;
     }
@@ -146,6 +155,16 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
     if (!key) {
       const claims = verifyLocalAgentJwt(token);
       if (!claims) {
+        logger.warn(
+          {
+            method: req.method,
+            url: req.originalUrl,
+            runId: runIdHeader ?? null,
+            failure: summarizeBearerFailure(token),
+          },
+          "agent bearer token rejected",
+        );
+        req.actor = { type: "none", source: "none" };
         next();
         return;
       }
@@ -157,11 +176,33 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
         .then((rows) => rows[0] ?? null);
 
       if (!agentRecord || agentRecord.companyId !== claims.company_id) {
+        logger.warn(
+          {
+            method: req.method,
+            url: req.originalUrl,
+            runId: runIdHeader ?? null,
+            agentId: claims.sub,
+            companyId: claims.company_id,
+          },
+          "agent bearer token resolved to invalid agent record",
+        );
+        req.actor = { type: "none", source: "none" };
         next();
         return;
       }
 
       if (agentRecord.status === "terminated" || agentRecord.status === "pending_approval") {
+        logger.warn(
+          {
+            method: req.method,
+            url: req.originalUrl,
+            runId: runIdHeader ?? null,
+            agentId: claims.sub,
+            status: agentRecord.status,
+          },
+          "agent bearer token resolved to inactive agent",
+        );
+        req.actor = { type: "none", source: "none" };
         next();
         return;
       }
@@ -190,6 +231,7 @@ export function actorMiddleware(db: Db, opts: ActorMiddlewareOptions): RequestHa
       .then((rows) => rows[0] ?? null);
 
     if (!agentRecord || agentRecord.status === "terminated" || agentRecord.status === "pending_approval") {
+      req.actor = { type: "none", source: "none" };
       next();
       return;
     }

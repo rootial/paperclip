@@ -142,4 +142,39 @@ describeEmbeddedPostgres("logActivity runId handling", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.runId).toBe(runId);
   });
+
+  it("stores run-linked local board activity as agent activity", async () => {
+    const { companyId, agentId } = await seedActor();
+    const runId = randomUUID();
+
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      status: "running",
+      contextSnapshot: { issueId: randomUUID() },
+    });
+
+    await expect(
+      logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: "local-board",
+        runId,
+        action: "issue.updated",
+        entityType: "issue",
+        entityId: randomUUID(),
+      }),
+    ).resolves.toBeUndefined();
+
+    const rows = await db.select().from(activityLog);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      actorType: "agent",
+      actorId: agentId,
+      agentId,
+      runId,
+    });
+  });
 });

@@ -175,6 +175,44 @@ describe("issueService.addComment wakeup (regression: MATA-196)", () => {
     expect(mockWakeup).not.toHaveBeenCalled();
   });
 
+  it("does NOT wake assignee when the assignee comments from their own run", async () => {
+    const issueRow = makeIssueRow({ status: "in_progress", assigneeAgentId: ASSIGNEE_AGENT_ID });
+    const commentRow = {
+      id: COMMENT_ID,
+      issueId: ISSUE_ID,
+      companyId: COMPANY_ID,
+      body: "status: completed",
+      createdByRunId: "run-1",
+    };
+    const insertResult = insertStub([commentRow]);
+
+    const db = {
+      select: vi.fn()
+        .mockReturnValueOnce(selectStub([issueRow]))
+        .mockReturnValueOnce(selectStub([{ agentId: ASSIGNEE_AGENT_ID }])),
+      insert: vi.fn(() => insertResult),
+      update: vi.fn(() => updateStub()),
+    };
+
+    const svc = issueService(db as any, { heartbeat: mockHeartbeat });
+    const comment = await svc.addComment(ISSUE_ID, "status: completed", {
+      runId: "run-1",
+      userId: "local-board",
+    });
+
+    expect(insertResult.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorAgentId: ASSIGNEE_AGENT_ID,
+        authorUserId: null,
+        createdByRunId: "run-1",
+      }),
+    );
+    expect(comment.authorAgentId).toBe(ASSIGNEE_AGENT_ID);
+    expect(comment.authorUserId).toBeNull();
+    expect(comment.runAgentId).toBe(ASSIGNEE_AGENT_ID);
+    expect(mockWakeup).not.toHaveBeenCalled();
+  });
+
   it("does NOT wake assignee when the issue is closed (done)", async () => {
     const issueRow = makeIssueRow({ status: "done", assigneeAgentId: ASSIGNEE_AGENT_ID });
     const commentRow = { id: COMMENT_ID, issueId: ISSUE_ID, companyId: COMPANY_ID, body: "post-done note" };
