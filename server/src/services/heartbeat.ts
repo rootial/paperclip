@@ -3503,6 +3503,10 @@ export function heartbeatService(db: Db) {
         .select({
           id: issues.id,
           companyId: issues.companyId,
+          identifier: issues.identifier,
+          status: issues.status,
+          executionRunId: issues.executionRunId,
+          assigneeAgentId: issues.assigneeAgentId,
         })
         .from(issues)
         .where(and(eq(issues.companyId, run.companyId), eq(issues.executionRunId, run.id)))
@@ -3565,6 +3569,36 @@ export function heartbeatService(db: Db) {
         const deferredPayload = parseObject(deferred.payload);
         const deferredContextSeed = parseObject(deferredPayload[DEFERRED_WAKE_CONTEXT_KEY]);
         const promotedContextSeed: Record<string, unknown> = { ...deferredContextSeed };
+        const deferredCommentIds = extractWakeCommentIds(deferredContextSeed);
+        let shouldReopenDeferredCommentWake = false;
+        if (
+          deferredCommentIds.length > 0 &&
+          (issue.status === "done" || issue.status === "cancelled")
+        ) {
+          const commentAuthors = await tx
+            .select({
+              id: issueComments.id,
+              authorAgentId: issueComments.authorAgentId,
+              authorUserId: issueComments.authorUserId,
+              createdByRunId: issueComments.createdByRunId,
+            })
+            .from(issueComments)
+            .where(inArray(issueComments.id, deferredCommentIds));
+
+          // Only reopen if at least one comment is from an external actor.
+          // Skip reopen when all comments are self-authored (by the issue
+          // assignee or the agent being woken) or were emitted by a run.
+          shouldReopenDeferredCommentWake = commentAuthors.some((c) => {
+            if (c.createdByRunId) return false;
+            if (c.authorAgentId) {
+              return (
+                c.authorAgentId !== issue.assigneeAgentId &&
+                c.authorAgentId !== deferred.agentId
+              );
+            }
+            return !!c.authorUserId;
+          });
+        }
         const promotedReason = readNonEmptyString(deferred.reason) ?? "issue_execution_promoted";
         const promotedSource =
           (readNonEmptyString(deferred.source) as WakeupOptions["source"]) ?? "automation";
@@ -3572,6 +3606,26 @@ export function heartbeatService(db: Db) {
           (readNonEmptyString(deferred.triggerDetail) as WakeupOptions["triggerDetail"]) ?? null;
         const promotedPayload = deferredPayload;
         delete promotedPayload[DEFERRED_WAKE_CONTEXT_KEY];
+
+        if (shouldReopenDeferredCommentWake) {
+          const reopenedFromStatus = issue.status;
+          const reopenedIssue = await issuesSvc.update(
+            issue.id,
+            {
+              status: "todo",
+              executionState: null,
+            },
+            tx,
+          );
+          if (reopenedIssue) {
+            issue.identifier = reopenedIssue.identifier;
+            issue.status = reopenedIssue.status;
+            issue.executionRunId = reopenedIssue.executionRunId;
+            if (!readNonEmptyString(promotedContextSeed.reopenedFrom)) {
+              promotedContextSeed.reopenedFrom = reopenedFromStatus;
+            }
+          }
+        }
 
         const {
           contextSnapshot: promotedContextSnapshot,
