@@ -1552,7 +1552,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
 }, forwardedRef) {
   const api = useAui();
   const [body, setBody] = useState("");
-  const [reopen, setReopen] = useState(issueStatus === "done" || issueStatus === "cancelled");
+  const [reopen, setReopen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const effectiveSuggestedAssigneeValue = suggestedAssigneeValue ?? currentAssigneeValue;
@@ -1619,7 +1619,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
         },
       });
       if (draftKey) clearDraft(draftKey);
-      setReopen(issueStatus === "done" || issueStatus === "cancelled");
+      setReopen(false);
       setReassignTarget(effectiveSuggestedAssigneeValue);
     } catch {
       setBody((current) =>

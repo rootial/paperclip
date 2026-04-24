@@ -15,6 +15,10 @@ const { threadMessagesMock } = vi.hoisted(() => ({
   threadMessagesMock: vi.fn(() => <div data-testid="thread-messages" />),
 }));
 
+const { appendMock } = vi.hoisted(() => ({
+  appendMock: vi.fn(),
+}));
+
 vi.mock("@assistant-ui/react", () => ({
   AssistantRuntimeProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ThreadPrimitive: {
@@ -32,7 +36,7 @@ vi.mock("@assistant-ui/react", () => ({
     Content: () => null,
     Parts: () => null,
   },
-  useAui: () => ({ thread: () => ({ append: vi.fn() }) }),
+  useAui: () => ({ thread: () => ({ append: appendMock }) }),
   useAuiState: () => false,
   useMessage: () => ({
     id: "message",
@@ -128,6 +132,7 @@ describe("IssueChatThread", () => {
     vi.useRealTimers();
     markdownEditorFocusMock.mockReset();
     threadMessagesMock.mockReset();
+    appendMock.mockReset();
   });
 
   it("drops the count heading and does not use an internal scrollbox", () => {
@@ -381,6 +386,60 @@ describe("IssueChatThread", () => {
     expect(markdownEditorFocusMock).toHaveBeenCalledTimes(1);
     scrollByMock.mockRestore();
     requestAnimationFrameMock.mockRestore();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("does not re-open a done issue unless the checkbox is explicitly enabled", async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IssueChatThread
+            comments={[]}
+            linkedRuns={[]}
+            timelineEvents={[]}
+            liveRuns={[]}
+            onAdd={async () => {}}
+            issueStatus="done"
+            enableLiveTranscriptPolling={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    const reopenCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    const editor = container.querySelector('textarea[aria-label="Issue chat editor"]') as HTMLTextAreaElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Send");
+
+    expect(reopenCheckbox).not.toBeNull();
+    expect(reopenCheckbox?.checked).toBe(false);
+    expect(editor).not.toBeNull();
+    expect(sendButton).not.toBeUndefined();
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(editor, "Done issue follow-up");
+      editor?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    expect(appendMock).toHaveBeenCalledWith(expect.objectContaining({
+      content: [{ type: "text", text: "Done issue follow-up" }],
+      runConfig: {
+        custom: {},
+      },
+    }));
 
     act(() => {
       root.unmount();
