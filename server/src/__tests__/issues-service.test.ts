@@ -1000,6 +1000,50 @@ describeEmbeddedPostgres("issueService blockers and dependency wake readiness", 
     expect(blockedRelations.blockedBy.map((relation) => relation.id)).toEqual([blockerId]);
   });
 
+  it("persists blocked-by relations when status switches to blocked in the same update", async () => {
+    const companyId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    const blockerId = randomUUID();
+    const blockedId = randomUUID();
+    await db.insert(issues).values([
+      {
+        id: blockerId,
+        companyId,
+        title: "Blocker",
+        status: "todo",
+        priority: "high",
+      },
+      {
+        id: blockedId,
+        companyId,
+        title: "Blocked issue",
+        status: "in_progress",
+        priority: "medium",
+      },
+    ]);
+
+    await svc.update(blockedId, {
+      status: "blocked",
+      blockedByIssueIds: [blockerId],
+    });
+
+    const blockedIssue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, blockedId))
+      .then((rows) => rows[0] ?? null);
+    const blockedRelations = await svc.getRelationSummaries(blockedId);
+
+    expect(blockedIssue?.status).toBe("blocked");
+    expect(blockedRelations.blockedBy.map((relation) => relation.id)).toEqual([blockerId]);
+  });
+
   it("rejects blocking cycles", async () => {
     const companyId = randomUUID();
     await db.insert(companies).values({
