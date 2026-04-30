@@ -1328,7 +1328,7 @@ export function issueService(db: Db, deps?: { heartbeat?: IssueAssignmentWakeupD
       }
 
       return candidates
-        .filter((candidate) => candidate.assigneeAgentId && !["backlog", "done", "cancelled"].includes(candidate.status))
+        .filter((candidate) => candidate.assigneeAgentId && candidate.status === "blocked")
         .map((candidate) => {
           const blockers = blockersByIssueId.get(candidate.id) ?? [];
           return {

@@ -1119,6 +1119,48 @@ describeEmbeddedPostgres("issueService blockers and dependency wake readiness", 
     ]);
   });
 
+  it("does not return dependents that are no longer blocked even when every blocker is done", async () => {
+    const companyId = randomUUID();
+    const assigneeAgentId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: assigneeAgentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const blockerA = randomUUID();
+    const blockerB = randomUUID();
+    const dependentIssueId = randomUUID();
+    await db.insert(issues).values([
+      { id: blockerA, companyId, title: "Blocker A", status: "done", priority: "medium" },
+      { id: blockerB, companyId, title: "Blocker B", status: "done", priority: "medium" },
+      {
+        id: dependentIssueId,
+        companyId,
+        title: "Ready issue",
+        status: "todo",
+        priority: "medium",
+        assigneeAgentId,
+      },
+    ]);
+
+    await svc.update(dependentIssueId, { blockedByIssueIds: [blockerA, blockerB] });
+
+    await expect(svc.listWakeableBlockedDependents(blockerA)).resolves.toEqual([]);
+  });
+
   it("wakes parents only when all direct children are terminal", async () => {
     const companyId = randomUUID();
     const assigneeAgentId = randomUUID();

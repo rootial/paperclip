@@ -153,6 +153,50 @@ describe("issue dependency wakeups in issue routes", () => {
     );
   });
 
+  it("does not wake dependents that are no longer in blocked status", async () => {
+    mockIssueService.getById.mockResolvedValue({
+      id: "issue-1",
+      companyId: "company-1",
+      identifier: "PAP-100",
+      title: "Finish blocker",
+      description: null,
+      status: "in_progress",
+      priority: "medium",
+      parentId: null,
+      assigneeAgentId: "agent-1",
+      assigneeUserId: null,
+      createdByAgentId: null,
+      createdByUserId: null,
+      executionWorkspaceId: null,
+      labels: [],
+      labelIds: [],
+    });
+    mockIssueService.update.mockResolvedValue({
+      id: "issue-1",
+      companyId: "company-1",
+      identifier: "PAP-100",
+      title: "Finish blocker",
+      description: null,
+      status: "done",
+      priority: "medium",
+      parentId: null,
+      assigneeAgentId: "agent-1",
+      assigneeUserId: null,
+      createdByAgentId: null,
+      createdByUserId: null,
+      executionWorkspaceId: null,
+      labels: [],
+      labelIds: [],
+    });
+    mockIssueService.listWakeableBlockedDependents.mockResolvedValue([]);
+
+    const res = await request(createApp()).patch("/api/issues/issue-1").send({ status: "done" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(res.status).toBe(200);
+    expect(mockWakeup).not.toHaveBeenCalled();
+  });
+
   it("wakes the parent when all direct children become terminal", async () => {
     mockIssueService.getById.mockResolvedValue({
       id: "child-1",
