@@ -124,6 +124,17 @@ function summarizeIssueRelationForActivity(relation: {
   };
 }
 
+function serializeIssueRelations(relations: {
+  blockedBy: { id: string }[];
+  blocks: unknown[];
+}) {
+  return {
+    blockedByIssueIds: relations.blockedBy.map((relation) => relation.id),
+    blockedBy: relations.blockedBy,
+    blocks: relations.blocks,
+  };
+}
+
 function activityExecutionParticipantKey(participant: ActivityExecutionParticipant): string {
   return participant.type === "agent" ? `agent:${participant.agentId}` : `user:${participant.userId}`;
 }
@@ -675,8 +686,7 @@ export function issueRoutes(
       ...issue,
       goalId: goal?.id ?? issue.goalId,
       ancestors,
-      blockedBy: relations.blockedBy,
-      blocks: relations.blocks,
+      ...serializeIssueRelations(relations),
       ...documentPayload,
       project: project ?? null,
       goal: goal ?? null,
@@ -721,8 +731,7 @@ export function issueRoutes(
         projectId: issue.projectId,
         goalId: goal?.id ?? issue.goalId,
         parentId: issue.parentId,
-        blockedBy: relations.blockedBy,
-        blocks: relations.blocks,
+        ...serializeIssueRelations(relations),
         assigneeAgentId: issue.assigneeAgentId,
         assigneeUserId: issue.assigneeUserId,
         updatedAt: issue.updatedAt,
@@ -1274,6 +1283,12 @@ export function issueRoutes(
       createdByAgentId: effectiveAgentId ?? null,
       createdByUserId: (effectiveAgentId) ? null : (actor.actorType === "user" ? actor.actorId : null),
     });
+    const issueResponse = Array.isArray(req.body.blockedByIssueIds)
+      ? {
+          ...issue,
+          ...serializeIssueRelations(await svc.getRelationSummaries(issue.id)),
+        }
+      : issue;
 
     await logActivity(db, {
       companyId,
@@ -1301,7 +1316,7 @@ export function issueRoutes(
       requestedByActorId: actor.actorId,
     });
 
-    res.status(201).json(issue);
+    res.status(201).json(issueResponse);
   });
 
   router.patch("/issues/:id", validate(updateIssueRouteSchema), async (req, res) => {
@@ -1497,14 +1512,13 @@ export function issueRoutes(
       res.status(404).json({ error: "Issue not found" });
       return;
     }
-    let issueResponse: typeof issue & { blockedBy?: unknown; blocks?: unknown } = issue;
+    let issueResponse: typeof issue & { blockedByIssueIds?: string[]; blockedBy?: unknown; blocks?: unknown } = issue;
     let updatedRelations: Awaited<ReturnType<typeof svc.getRelationSummaries>> | null = null;
     if (issue && Array.isArray(req.body.blockedByIssueIds)) {
       updatedRelations = await svc.getRelationSummaries(issue.id);
       issueResponse = {
         ...issue,
-        blockedBy: updatedRelations.blockedBy,
-        blocks: updatedRelations.blocks,
+        ...serializeIssueRelations(updatedRelations),
       };
     }
     await routinesSvc.syncRunStatusForIssue(issue.id);

@@ -253,6 +253,7 @@ describe("issue goal context routes", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.body.issue.blockedByIssueIds).toEqual(["55555555-5555-4555-8555-555555555555"]);
     expect(res.body.issue.blockedBy).toEqual([
       expect.objectContaining({
         id: "55555555-5555-4555-8555-555555555555",

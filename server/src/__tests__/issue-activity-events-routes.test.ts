@@ -146,6 +146,13 @@ describe("issue activity event routes", () => {
       .send({ blockedByIssueIds: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"] });
 
     expect(res.status).toBe(200);
+    expect(res.body.blockedByIssueIds).toEqual(["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]);
+    expect(res.body.blockedBy).toEqual([
+      expect.objectContaining({
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        identifier: "PAP-11",
+      }),
+    ]);
     expect(mockLogActivity).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
