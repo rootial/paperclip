@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { createBufferedTextFileWriter, runDatabaseBackup, runDatabaseRestore } from "./backup-lib.js";
+import { createBufferedTextFileWriter, pruneDatabaseBackups, runDatabaseBackup, runDatabaseRestore } from "./backup-lib.js";
 import { ensurePostgresDatabase } from "./client.js";
 import {
   getEmbeddedPostgresTestSupport,
@@ -70,6 +70,35 @@ describe("createBufferedTextFileWriter", () => {
     await writer.close();
 
     expect(fs.readFileSync(outputPath, "utf8")).toBe(lines.join("\n"));
+  });
+});
+
+describe("pruneDatabaseBackups", () => {
+  it("evicts oldest backups first when count or total-size caps are exceeded", () => {
+    const backupDir = createTempDir("paperclip-db-prune-output-");
+    const files = [
+      { name: "paperclip-test-20260518-000000.sql", size: 600, ageMinutes: 30 },
+      { name: "paperclip-test-20260518-010000.sql", size: 600, ageMinutes: 20 },
+      { name: "paperclip-test-20260518-020000.sql", size: 600, ageMinutes: 10 },
+    ];
+
+    for (const file of files) {
+      const fullPath = path.join(backupDir, file.name);
+      fs.writeFileSync(fullPath, "x".repeat(file.size), "utf8");
+      const timestamp = new Date(Date.now() - file.ageMinutes * 60 * 1000);
+      fs.utimesSync(fullPath, timestamp, timestamp);
+    }
+
+    const prunedCount = pruneDatabaseBackups({
+      backupDir,
+      retentionDays: 30,
+      filenamePrefix: "paperclip-test",
+      maxCount: 2,
+      maxTotalSizeBytes: 1024,
+    });
+
+    expect(prunedCount).toBe(2);
+    expect(fs.readdirSync(backupDir).sort()).toEqual(["paperclip-test-20260518-020000.sql"]);
   });
 });
 

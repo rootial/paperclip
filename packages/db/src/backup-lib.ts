@@ -8,6 +8,8 @@ export type RunDatabaseBackupOptions = {
   backupDir: string;
   retentionDays: number;
   filenamePrefix?: string;
+  maxCount?: number;
+  maxTotalSizeBytes?: number;
   connectTimeoutSeconds?: number;
   includeMigrationJournal?: boolean;
   excludeTables?: string[];
@@ -18,6 +20,13 @@ export type RunDatabaseBackupResult = {
   backupFile: string;
   sizeBytes: number;
   prunedCount: number;
+};
+
+type BackupFileEntry = {
+  fullPath: string;
+  mtimeMs: number;
+  sizeBytes: number;
+  name: string;
 };
 
 export type RunDatabaseRestoreOptions = {
@@ -89,6 +98,67 @@ function pruneOldBackups(backupDir: string, retentionDays: number, filenamePrefi
       unlinkSync(fullPath);
       pruned++;
     }
+  }
+
+  return pruned;
+}
+
+function normalizePositiveInt(value: number | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  const normalized = Math.trunc(value);
+  return normalized > 0 ? normalized : null;
+}
+
+function listManagedBackups(backupDir: string, filenamePrefix: string): BackupFileEntry[] {
+  if (!existsSync(backupDir)) return [];
+  return readdirSync(backupDir)
+    .filter((name) => name.startsWith(`${filenamePrefix}-`) && name.endsWith(".sql"))
+    .map((name) => {
+      const fullPath = resolve(backupDir, name);
+      const stat = statSync(fullPath);
+      return {
+        fullPath,
+        mtimeMs: stat.mtimeMs,
+        sizeBytes: stat.size,
+        name,
+      };
+    })
+    .sort((left, right) => {
+      if (left.mtimeMs !== right.mtimeMs) return left.mtimeMs - right.mtimeMs;
+      return left.name.localeCompare(right.name);
+    });
+}
+
+export function pruneDatabaseBackups(input: {
+  backupDir: string;
+  retentionDays: number;
+  filenamePrefix?: string;
+  maxCount?: number;
+  maxTotalSizeBytes?: number;
+}): number {
+  const filenamePrefix = input.filenamePrefix ?? "paperclip";
+  let pruned = pruneOldBackups(input.backupDir, input.retentionDays, filenamePrefix);
+  const maxCount = normalizePositiveInt(input.maxCount);
+  const maxTotalSizeBytes = normalizePositiveInt(input.maxTotalSizeBytes);
+
+  if (maxCount == null && maxTotalSizeBytes == null) {
+    return pruned;
+  }
+
+  const backups = listManagedBackups(input.backupDir, filenamePrefix);
+  const retained = [...backups];
+  let retainedBytes = retained.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+
+  while (retained.length > 1) {
+    const exceedsCount = maxCount != null && retained.length > maxCount;
+    const exceedsSize = maxTotalSizeBytes != null && retainedBytes > maxTotalSizeBytes;
+    if (!exceedsCount && !exceedsSize) break;
+
+    const oldest = retained.shift();
+    if (!oldest) break;
+    unlinkSync(oldest.fullPath);
+    retainedBytes -= oldest.sizeBytes;
+    pruned += 1;
   }
 
   return pruned;
@@ -282,6 +352,8 @@ export function createBufferedTextFileWriter(filePath: string, maxBufferedBytes 
 export async function runDatabaseBackup(opts: RunDatabaseBackupOptions): Promise<RunDatabaseBackupResult> {
   const filenamePrefix = opts.filenamePrefix ?? "paperclip";
   const retentionDays = Math.max(1, Math.trunc(opts.retentionDays));
+  const maxCount = normalizePositiveInt(opts.maxCount);
+  const maxTotalSizeBytes = normalizePositiveInt(opts.maxTotalSizeBytes);
   const connectTimeout = Math.max(1, Math.trunc(opts.connectTimeoutSeconds ?? 5));
   const includeMigrationJournal = opts.includeMigrationJournal === true;
   const excludedTableNames = normalizeTableNameSet(opts.excludeTables);
@@ -665,7 +737,13 @@ export async function runDatabaseBackup(opts: RunDatabaseBackupOptions): Promise
     await writer.close();
 
     const sizeBytes = statSync(backupFile).size;
-    const prunedCount = pruneOldBackups(opts.backupDir, retentionDays, filenamePrefix);
+    const prunedCount = pruneDatabaseBackups({
+      backupDir: opts.backupDir,
+      retentionDays,
+      filenamePrefix,
+      maxCount: maxCount ?? undefined,
+      maxTotalSizeBytes: maxTotalSizeBytes ?? undefined,
+    });
 
     return {
       backupFile,

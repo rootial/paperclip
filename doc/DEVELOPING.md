@@ -340,6 +340,8 @@ Paperclip can run automatic DB backups on a timer. Defaults:
 - enabled
 - every 60 minutes
 - retain 30 days
+- retain at most 7 backups
+- retain at most 2048 MiB total
 - backup dir: `~/.paperclip/instances/default/data/backups`
 
 Configure these in:
@@ -361,6 +363,8 @@ Environment overrides:
 - `PAPERCLIP_DB_BACKUP_ENABLED=true|false`
 - `PAPERCLIP_DB_BACKUP_INTERVAL_MINUTES=<minutes>`
 - `PAPERCLIP_DB_BACKUP_RETENTION_DAYS=<days>`
+- `PAPERCLIP_DB_BACKUP_MAX_COUNT=<count>`
+- `PAPERCLIP_DB_BACKUP_MAX_TOTAL_SIZE_MB=<mb>`
 - `PAPERCLIP_DB_BACKUP_DIR=/absolute/or/~/path`
 
 ## Secrets in Dev

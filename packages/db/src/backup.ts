@@ -11,6 +11,8 @@ type PartialConfig = {
     backup?: {
       dir?: string;
       retentionDays?: number;
+      maxCount?: number;
+      maxTotalSizeMb?: number;
     };
   };
 };
@@ -88,16 +90,29 @@ function resolveRetentionDays(config: PartialConfig | null): number {
   return asPositiveInt(config?.database?.backup?.retentionDays) ?? 30;
 }
 
+function resolveMaxCount(config: PartialConfig | null): number {
+  return asPositiveInt(config?.database?.backup?.maxCount) ?? 7;
+}
+
+function resolveMaxTotalSizeBytes(config: PartialConfig | null): number {
+  const sizeMb = asPositiveInt(config?.database?.backup?.maxTotalSizeMb) ?? 2048;
+  return sizeMb * 1024 * 1024;
+}
+
 async function main() {
   const configPath = resolveDefaultConfigPath();
   const config = readConfig(configPath);
   const connectionString = resolveConnectionString(config);
   const backupDir = resolveBackupDir(config);
   const retentionDays = resolveRetentionDays(config);
+  const maxCount = resolveMaxCount(config);
+  const maxTotalSizeBytes = resolveMaxTotalSizeBytes(config);
 
   console.log(`Config path: ${configPath}`);
   console.log(`Backing up database to: ${backupDir}`);
   console.log(`Retention window: ${retentionDays} day(s)`);
+  console.log(`Max backups: ${maxCount}`);
+  console.log(`Max total size: ${Math.floor(maxTotalSizeBytes / (1024 * 1024))} MiB`);
 
   try {
     const result = await runDatabaseBackup({
@@ -105,6 +120,8 @@ async function main() {
       backupDir,
       retentionDays,
       filenamePrefix: "paperclip",
+      maxCount,
+      maxTotalSizeBytes,
     });
 
     console.log(`Backup saved: ${formatDatabaseBackupResult(result)}`);

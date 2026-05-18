@@ -14,6 +14,8 @@ type DbBackupOptions = {
   config?: string;
   dir?: string;
   retentionDays?: number;
+  maxCount?: number;
+  maxTotalSizeMb?: number;
   filenamePrefix?: string;
   json?: boolean;
 };
@@ -42,6 +44,22 @@ function normalizeRetentionDays(value: number | undefined, fallback: number): nu
   return candidate;
 }
 
+function normalizeMaxCount(value: number | undefined, fallback: number): number {
+  const candidate = value ?? fallback;
+  if (!Number.isInteger(candidate) || candidate < 1) {
+    throw new Error(`Invalid max backup count '${String(candidate)}'. Use a positive integer.`);
+  }
+  return candidate;
+}
+
+function normalizeMaxTotalSizeMb(value: number | undefined, fallback: number): number {
+  const candidate = value ?? fallback;
+  if (!Number.isInteger(candidate) || candidate < 1) {
+    throw new Error(`Invalid max backup size '${String(candidate)}'. Use a positive integer in MiB.`);
+  }
+  return candidate;
+}
+
 function resolveBackupDir(raw: string): string {
   return path.resolve(expandHomePrefix(raw.trim()));
 }
@@ -60,12 +78,22 @@ export async function dbBackupCommand(opts: DbBackupOptions): Promise<void> {
     opts.retentionDays,
     config?.database.backup.retentionDays ?? 30,
   );
+  const maxCount = normalizeMaxCount(
+    opts.maxCount,
+    config?.database.backup.maxCount ?? 7,
+  );
+  const maxTotalSizeMb = normalizeMaxTotalSizeMb(
+    opts.maxTotalSizeMb,
+    config?.database.backup.maxTotalSizeMb ?? 2048,
+  );
   const filenamePrefix = opts.filenamePrefix?.trim() || "paperclip";
 
   p.log.message(pc.dim(`Config: ${configPath}`));
   p.log.message(pc.dim(`Connection source: ${connection.source}`));
   p.log.message(pc.dim(`Backup dir: ${backupDir}`));
   p.log.message(pc.dim(`Retention: ${retentionDays} day(s)`));
+  p.log.message(pc.dim(`Max backups: ${maxCount}`));
+  p.log.message(pc.dim(`Max total size: ${maxTotalSizeMb} MiB`));
 
   const spinner = p.spinner();
   spinner.start("Creating database backup...");
@@ -75,6 +103,8 @@ export async function dbBackupCommand(opts: DbBackupOptions): Promise<void> {
       backupDir,
       retentionDays,
       filenamePrefix,
+      maxCount,
+      maxTotalSizeBytes: maxTotalSizeMb * 1024 * 1024,
     });
     spinner.stop(`Backup saved: ${formatDatabaseBackupResult(result)}`);
 
@@ -87,6 +117,8 @@ export async function dbBackupCommand(opts: DbBackupOptions): Promise<void> {
             prunedCount: result.prunedCount,
             backupDir,
             retentionDays,
+            maxCount,
+            maxTotalSizeMb,
             connectionSource: connection.source,
           },
           null,

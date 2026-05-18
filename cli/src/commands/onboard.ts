@@ -56,6 +56,8 @@ const ONBOARD_ENV_KEYS = [
   "PAPERCLIP_DB_BACKUP_ENABLED",
   "PAPERCLIP_DB_BACKUP_INTERVAL_MINUTES",
   "PAPERCLIP_DB_BACKUP_RETENTION_DAYS",
+  "PAPERCLIP_DB_BACKUP_MAX_COUNT",
+  "PAPERCLIP_DB_BACKUP_MAX_TOTAL_SIZE_MB",
   "PAPERCLIP_DB_BACKUP_DIR",
   "PAPERCLIP_DEPLOYMENT_MODE",
   "PAPERCLIP_DEPLOYMENT_EXPOSURE",
@@ -163,6 +165,14 @@ function quickstartDefaultsFromEnv(): {
     1,
     parseNumberFromEnv(process.env.PAPERCLIP_DB_BACKUP_RETENTION_DAYS) ?? 30,
   );
+  const databaseBackupMaxCount = Math.max(
+    1,
+    parseNumberFromEnv(process.env.PAPERCLIP_DB_BACKUP_MAX_COUNT) ?? 7,
+  );
+  const databaseBackupMaxTotalSizeMb = Math.max(
+    1,
+    parseNumberFromEnv(process.env.PAPERCLIP_DB_BACKUP_MAX_TOTAL_SIZE_MB) ?? 2048,
+  );
   const defaults: OnboardDefaults = {
     database: {
       mode: databaseUrl ? "postgres" : "embedded-postgres",
@@ -173,6 +183,8 @@ function quickstartDefaultsFromEnv(): {
         enabled: databaseBackupEnabled,
         intervalMinutes: databaseBackupIntervalMinutes,
         retentionDays: databaseBackupRetentionDays,
+        maxCount: databaseBackupMaxCount,
+        maxTotalSizeMb: databaseBackupMaxTotalSizeMb,
         dir: resolvePathFromEnv(process.env.PAPERCLIP_DB_BACKUP_DIR) ?? resolveDefaultBackupDir(instanceId),
       },
     },

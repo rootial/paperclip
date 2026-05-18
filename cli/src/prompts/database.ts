@@ -19,6 +19,8 @@ export async function promptDatabase(current?: DatabaseConfig): Promise<Database
       intervalMinutes: 60,
       retentionDays: 30,
       dir: defaultBackupDir,
+      maxCount: 7,
+      maxTotalSizeMb: 2048,
     },
   };
 
@@ -142,6 +144,38 @@ export async function promptDatabase(current?: DatabaseConfig): Promise<Database
     process.exit(0);
   }
 
+  const backupMaxCountInput = await p.text({
+    message: "Max retained backup files",
+    defaultValue: String(base.backup.maxCount || 7),
+    placeholder: "7",
+    validate: (val) => {
+      const n = Number(val);
+      if (!Number.isInteger(n) || n < 1) return "Max backup count must be a positive integer";
+      if (n > 10000) return "Max backup count must be 10000 or less";
+      return undefined;
+    },
+  });
+  if (p.isCancel(backupMaxCountInput)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  const backupMaxTotalSizeInput = await p.text({
+    message: "Max retained backup size (MiB)",
+    defaultValue: String(base.backup.maxTotalSizeMb || 2048),
+    placeholder: "2048",
+    validate: (val) => {
+      const n = Number(val);
+      if (!Number.isInteger(n) || n < 1) return "Max total size must be a positive integer";
+      if (n > 1048576) return "Max total size must be 1048576 MiB or less";
+      return undefined;
+    },
+  });
+  if (p.isCancel(backupMaxTotalSizeInput)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
   return {
     mode,
     connectionString,
@@ -152,6 +186,8 @@ export async function promptDatabase(current?: DatabaseConfig): Promise<Database
       intervalMinutes: Number(backupIntervalInput || "60"),
       retentionDays: Number(backupRetentionInput || "30"),
       dir: backupDirInput || defaultBackupDir,
+      maxCount: Number(backupMaxCountInput || "7"),
+      maxTotalSizeMb: Number(backupMaxTotalSizeInput || "2048"),
     },
   };
 }

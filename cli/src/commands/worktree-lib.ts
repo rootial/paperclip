@@ -204,6 +204,8 @@ export function buildWorktreeConfig(input: {
         enabled: source?.database.backup.enabled ?? true,
         intervalMinutes: source?.database.backup.intervalMinutes ?? 60,
         retentionDays: source?.database.backup.retentionDays ?? 30,
+        maxCount: source?.database.backup.maxCount ?? 7,
+        maxTotalSizeMb: source?.database.backup.maxTotalSizeMb ?? 2048,
         dir: paths.backupDir,
       },
     },

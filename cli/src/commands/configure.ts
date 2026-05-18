@@ -45,6 +45,8 @@ function defaultConfig(): PaperclipConfig {
         intervalMinutes: 60,
         retentionDays: 30,
         dir: resolveDefaultBackupDir(instanceId),
+        maxCount: 7,
+        maxTotalSizeMb: 2048,
       },
     },
     logging: {
